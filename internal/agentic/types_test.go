@@ -62,12 +62,22 @@ func TestFixRequest_Validate(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "invalid file type",
+			name: "valid python file type",
 			request: FixRequest{
 				UserMessage: "fix the bug",
 				FileContent: "some code",
 				FilePath:    "/path/to/file.py",
 				FileType:    "python",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid file type",
+			request: FixRequest{
+				UserMessage: "fix the bug",
+				FileContent: "some code",
+				FilePath:    "/path/to/file.java",
+				FileType:    "java",
 			},
 			wantErr: true,
 		},

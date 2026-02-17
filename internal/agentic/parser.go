@@ -10,7 +10,7 @@ import (
 // FixParser extracts and validates code fixes from AI responses.
 // It provides methods to parse markdown-formatted AI responses, identify which code blocks
 // represent actual fixes (versus examples or explanations), and validate syntax for different
-// file types (bash, shell, powershell, markdown).
+// file types (bash, shell, powershell, markdown, python).
 //
 // The parser uses heuristics to distinguish fix blocks from explanatory code:
 //   - Blocks matching the target file type are prioritized
@@ -21,6 +21,7 @@ import (
 //   - Bash/Shell: Checks for unmatched quotes, brackets, and control structures (if/fi, do/done, case/esac)
 //   - PowerShell: Checks for unmatched quotes, brackets, and try/catch/finally blocks
 //   - Markdown: Checks for unmatched code block markers
+//   - Python: Checks for unmatched quotes, brackets, and basic indentation consistency
 type FixParser struct {
 	debug bool // Enable debug logging
 }
@@ -173,6 +174,8 @@ func normalizeFileType(fileType string) string {
 		return "powershell"
 	case "markdown", "md":
 		return "markdown"
+	case "python", "py":
+		return "python"
 	default:
 		return fileType
 	}
@@ -190,6 +193,8 @@ func normalizeLanguage(language string) string {
 		return "powershell"
 	case "md", "markdown":
 		return "markdown"
+	case "py", "python":
+		return "python"
 	default:
 		return language
 	}
@@ -239,7 +244,7 @@ func countLines(code string) int {
 
 // ValidateFixSyntax performs basic syntax validation on a fix
 // Validates that the code is syntactically appropriate for the file type
-// Supports: bash, shell, powershell, markdown
+// Supports: bash, shell, powershell, markdown, python
 // Returns an error if validation fails, nil if validation passes
 func (p *FixParser) ValidateFixSyntax(code string, fileType string) error {
 	p.logDebug("Validating syntax for file type: %s (code length: %d bytes)", fileType, len(code))
@@ -261,6 +266,9 @@ func (p *FixParser) ValidateFixSyntax(code string, fileType string) error {
 	case "markdown":
 		p.logDebug("Performing markdown syntax validation")
 		return validateMarkdownSyntax(code)
+	case "python":
+		p.logDebug("Performing Python syntax validation")
+		return validatePythonSyntax(code)
 	default:
 		// For unknown file types, perform minimal validation
 		p.logDebug("Unknown file type, skipping syntax validation")
@@ -543,3 +551,64 @@ func checkPowerShellControlStructures(code string) error {
 	return nil
 }
 
+// validatePythonSyntax performs basic Python syntax validation
+func validatePythonSyntax(code string) error {
+	// Basic checks for common Python syntax errors
+	
+	// Check for unmatched quotes
+	if err := checkUnmatchedQuotes(code); err != nil {
+		return fmt.Errorf("python syntax error: %w", err)
+	}
+
+	// Check for unmatched brackets/parentheses
+	if err := checkUnmatchedBrackets(code); err != nil {
+		return fmt.Errorf("python syntax error: %w", err)
+	}
+
+	// Check for basic indentation consistency
+	if err := checkPythonIndentation(code); err != nil {
+		return fmt.Errorf("python syntax error: %w", err)
+	}
+
+	return nil
+}
+
+// checkPythonIndentation performs basic Python indentation validation
+func checkPythonIndentation(code string) error {
+	lines := strings.Split(code, "\n")
+	
+	// Track if we're expecting an indented block
+	expectIndent := false
+	prevIndent := 0
+	
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		
+		// Skip empty lines and comments
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		
+		// Calculate indentation level
+		indent := len(line) - len(strings.TrimLeft(line, " \t"))
+		
+		// Check if line ends with colon (starts a block)
+		if strings.HasSuffix(trimmed, ":") {
+			expectIndent = true
+			prevIndent = indent
+			continue
+		}
+		
+		// If we expected indentation, check that it increased
+		if expectIndent {
+			if indent <= prevIndent {
+				return fmt.Errorf("expected indented block after line %d", i)
+			}
+			expectIndent = false
+		}
+		
+		prevIndent = indent
+	}
+	
+	return nil
+}

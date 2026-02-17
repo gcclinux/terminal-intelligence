@@ -11,8 +11,8 @@ import (
 
 // JSONConfig represents the JSON config file schema.
 type JSONConfig struct {
-	GenAIType string `json:"genai_type"`
-	ModelID   string `json:"model_id"`
+	Agent     string `json:"agent"`
+	Model     string `json:"model"`
 	OllamaURL string `json:"ollama_url"`
 	GeminiAPI string `json:"gemini_api"`
 	Workspace string `json:"workspace"`
@@ -43,11 +43,11 @@ func ToJSON(cfg *JSONConfig) ([]byte, error) {
 
 // Validate checks that the JSONConfig has valid field values.
 func Validate(cfg *JSONConfig) error {
-	if cfg.GenAIType != "gemini" && cfg.GenAIType != "ollama" {
-		return fmt.Errorf("invalid genai_type: must be \"gemini\" or \"ollama\"")
+	if cfg.Agent != "gemini" && cfg.Agent != "ollama" {
+		return fmt.Errorf("invalid agent: must be \"gemini\" or \"ollama\"")
 	}
-	if cfg.GenAIType == "gemini" && cfg.GeminiAPI == "" {
-		return fmt.Errorf("gemini_api is required when genai_type is \"gemini\"")
+	if cfg.Agent == "gemini" && cfg.GeminiAPI == "" {
+		return fmt.Errorf("gemini_api is required when agent is \"gemini\"")
 	}
 	return nil
 }
@@ -55,11 +55,11 @@ func Validate(cfg *JSONConfig) error {
 // ApplyToAppConfig merges a JSONConfig into an existing AppConfig,
 // setting only the fields that are non-empty in the JSONConfig.
 func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
-	if jcfg.GenAIType != "" {
-		appCfg.Provider = jcfg.GenAIType
+	if jcfg.Agent != "" {
+		appCfg.Provider = jcfg.Agent
 	}
-	if jcfg.ModelID != "" {
-		appCfg.DefaultModel = jcfg.ModelID
+	if jcfg.Model != "" {
+		appCfg.DefaultModel = jcfg.Model
 	}
 	if jcfg.OllamaURL != "" {
 		appCfg.OllamaURL = jcfg.OllamaURL
@@ -74,8 +74,8 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 // AppConfigToJSONConfig converts an AppConfig into a JSONConfig for serialization.
 func AppConfigToJSONConfig(appCfg *types.AppConfig) *JSONConfig {
 	return &JSONConfig{
-		GenAIType: appCfg.Provider,
-		ModelID:   appCfg.DefaultModel,
+		Agent:     appCfg.Provider,
+		Model:     appCfg.DefaultModel,
 		OllamaURL: appCfg.OllamaURL,
 		GeminiAPI: appCfg.GeminiAPIKey,
 		Workspace: appCfg.WorkspaceDir,
@@ -108,8 +108,8 @@ func CreateDefaultConfig() (string, error) {
 	// Create default config with example values
 	homeDir, _ := os.UserHomeDir()
 	defaultConfig := &JSONConfig{
-		GenAIType: "ollama",
-		ModelID:   "llama2",
+		Agent:     "ollama",
+		Model:     "llama2",
 		OllamaURL: "http://localhost:11434",
 		GeminiAPI: "",
 		Workspace: filepath.Join(homeDir, "ti-workspace"),

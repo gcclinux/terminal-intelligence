@@ -12,7 +12,7 @@ import (
 // --- Unit tests for validation edge cases (Task 1.6) ---
 
 func TestValidate_GeminiWithEmptyAPI_ReturnsError(t *testing.T) {
-	cfg := &JSONConfig{GenAIType: "gemini", GeminiAPI: ""}
+	cfg := &JSONConfig{Agent: "gemini", GeminiAPI: ""}
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error for gemini with empty gemini_api, got nil")
@@ -23,7 +23,7 @@ func TestValidate_GeminiWithEmptyAPI_ReturnsError(t *testing.T) {
 }
 
 func TestValidate_OllamaWithEmptyAPI_Passes(t *testing.T) {
-	cfg := &JSONConfig{GenAIType: "ollama", GeminiAPI: ""}
+	cfg := &JSONConfig{Agent: "ollama", GeminiAPI: ""}
 	err := Validate(cfg)
 	if err != nil {
 		t.Fatalf("expected no error for ollama with empty gemini_api, got: %v", err)
@@ -31,10 +31,10 @@ func TestValidate_OllamaWithEmptyAPI_Passes(t *testing.T) {
 }
 
 func TestValidate_ValidGenAIType_EmptyOtherFields_Passes(t *testing.T) {
-	cfg := &JSONConfig{GenAIType: "ollama"}
+	cfg := &JSONConfig{Agent: "ollama"}
 	err := Validate(cfg)
 	if err != nil {
-		t.Fatalf("expected no error for valid genai_type with empty fields, got: %v", err)
+		t.Fatalf("expected no error for valid agent with empty fields, got: %v", err)
 	}
 }
 
@@ -48,12 +48,12 @@ func TestLoadFromFile_NonExistentPath_ReturnsError(t *testing.T) {
 // --- Additional unit tests for core functions ---
 
 func TestFromJSON_ValidJSON(t *testing.T) {
-	data := []byte(`{"genai_type":"gemini","model_id":"flash","gemini_api":"key123"}`)
+	data := []byte(`{"agent":"gemini","model":"flash","gemini_api":"key123"}`)
 	cfg, err := FromJSON(data)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.GenAIType != "gemini" || cfg.ModelID != "flash" || cfg.GeminiAPI != "key123" {
+	if cfg.Agent != "gemini" || cfg.Model != "flash" || cfg.GeminiAPI != "key123" {
 		t.Errorf("unexpected config values: %+v", cfg)
 	}
 }
@@ -67,8 +67,8 @@ func TestFromJSON_InvalidJSON_ReturnsError(t *testing.T) {
 
 func TestToJSON_RoundTrip(t *testing.T) {
 	original := &JSONConfig{
-		GenAIType: "ollama",
-		ModelID:   "llama2",
+		Agent:     "ollama",
+		Model:     "llama2",
 		OllamaURL: "http://localhost:11434",
 		Workspace: "/tmp/ws",
 	}
@@ -87,8 +87,8 @@ func TestToJSON_RoundTrip(t *testing.T) {
 
 func TestApplyToAppConfig_SetsNonEmptyFields(t *testing.T) {
 	jcfg := &JSONConfig{
-		GenAIType: "gemini",
-		ModelID:   "flash",
+		Agent:     "gemini",
+		Model:     "flash",
 		GeminiAPI: "key123",
 	}
 	appCfg := types.DefaultConfig()
@@ -128,7 +128,7 @@ func TestConfigFilePath_ReturnsHomeDirPath(t *testing.T) {
 func TestLoadFromFile_ValidFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test-config.json")
-	content := []byte(`{"genai_type":"ollama","model_id":"llama2","ollama_url":"http://localhost:11434"}`)
+	content := []byte(`{"agent":"ollama","model":"llama2","ollama_url":"http://localhost:11434"}`)
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		t.Fatalf("failed to write test file: %v", err)
 	}
@@ -136,7 +136,7 @@ func TestLoadFromFile_ValidFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if cfg.GenAIType != "ollama" || cfg.ModelID != "llama2" {
+	if cfg.Agent != "ollama" || cfg.Model != "llama2" {
 		t.Errorf("unexpected config: %+v", cfg)
 	}
 }
@@ -149,8 +149,8 @@ func TestReq1_LoadConfigFromJSON_AllFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ti.json")
 	content := []byte(`{
-		"genai_type": "gemini",
-		"model_id": "gemini-2.0-flash-exp",
+		"agent": "gemini",
+		"model": "gemini-2.0-flash-exp",
 		"ollama_url": "http://custom:11434",
 		"gemini_api": "test-api-key",
 		"workspace": "/tmp/my-workspace"
@@ -167,11 +167,11 @@ func TestReq1_LoadConfigFromJSON_AllFields(t *testing.T) {
 	appCfg := types.DefaultConfig()
 	ApplyToAppConfig(jcfg, appCfg)
 
-	// AC 1.2: genai_type → Provider
+	// AC 1.2: agent → Provider
 	if appCfg.Provider != "gemini" {
 		t.Errorf("Provider: got %q, want %q", appCfg.Provider, "gemini")
 	}
-	// AC 1.3: model_id → DefaultModel
+	// AC 1.3: model → DefaultModel
 	if appCfg.DefaultModel != "gemini-2.0-flash-exp" {
 		t.Errorf("DefaultModel: got %q, want %q", appCfg.DefaultModel, "gemini-2.0-flash-exp")
 	}
@@ -213,8 +213,8 @@ func TestReq2_FallbackToCLI_NoConfigFile(t *testing.T) {
 func TestReq2_CLIOverridesConfigFile(t *testing.T) {
 	// AC 2.2: CLI flags override config file values
 	jcfg := &JSONConfig{
-		GenAIType: "ollama",
-		ModelID:   "llama2",
+		Agent:     "ollama",
+		Model:     "llama2",
 		OllamaURL: "http://config:11434",
 		Workspace: "/config/workspace",
 	}
@@ -243,7 +243,7 @@ func TestReq2_CLIOverridesConfigFile(t *testing.T) {
 
 func TestReq3_InvalidJSON_ReturnsError(t *testing.T) {
 	// AC 3.1: Invalid JSON returns descriptive error
-	_, err := FromJSON([]byte(`{"genai_type": "ollama",`))
+	_, err := FromJSON([]byte(`{"agent": "ollama",`))
 	if err == nil {
 		t.Fatal("expected error for invalid JSON")
 	}
@@ -253,23 +253,23 @@ func TestReq3_InvalidJSON_ReturnsError(t *testing.T) {
 }
 
 func TestReq3_UnrecognizedGenAIType_ReturnsError(t *testing.T) {
-	// AC 3.2: Unrecognized genai_type returns error
+	// AC 3.2: Unrecognized agent returns error
 	testCases := []string{"openai", "anthropic", "", "GEMINI", "Ollama"}
 	for _, provider := range testCases {
-		cfg := &JSONConfig{GenAIType: provider}
+		cfg := &JSONConfig{Agent: provider}
 		err := Validate(cfg)
 		if err == nil {
-			t.Errorf("expected error for genai_type=%q, got nil", provider)
+			t.Errorf("expected error for agent=%q, got nil", provider)
 		}
-		if !strings.Contains(err.Error(), "invalid genai_type") {
-			t.Errorf("error for genai_type=%q should mention invalid genai_type, got: %s", provider, err.Error())
+		if !strings.Contains(err.Error(), "invalid agent") {
+			t.Errorf("error for agent=%q should mention invalid agent, got: %s", provider, err.Error())
 		}
 	}
 }
 
 func TestReq3_GeminiMissingAPIKey_ReturnsError(t *testing.T) {
 	// AC 3.3: Gemini with missing/empty API key returns error
-	cfg := &JSONConfig{GenAIType: "gemini", GeminiAPI: ""}
+	cfg := &JSONConfig{Agent: "gemini", GeminiAPI: ""}
 	err := Validate(cfg)
 	if err == nil {
 		t.Fatal("expected error for gemini with empty API key")
@@ -305,11 +305,11 @@ func TestReq4_SerializeAppConfigToJSON(t *testing.T) {
 		t.Fatalf("FromJSON error: %v", err)
 	}
 
-	if restored.GenAIType != "ollama" {
-		t.Errorf("GenAIType: got %q, want %q", restored.GenAIType, "ollama")
+	if restored.Agent != "ollama" {
+		t.Errorf("Agent: got %q, want %q", restored.Agent, "ollama")
 	}
-	if restored.ModelID != "llama2" {
-		t.Errorf("ModelID: got %q, want %q", restored.ModelID, "llama2")
+	if restored.Model != "llama2" {
+		t.Errorf("Model: got %q, want %q", restored.Model, "llama2")
 	}
 }
 
@@ -393,11 +393,11 @@ func TestCreateDefaultConfig_CreatesValidFile(t *testing.T) {
 	}
 
 	// Verify default values
-	if jcfg.GenAIType != "ollama" {
-		t.Errorf("GenAIType: got %q, want %q", jcfg.GenAIType, "ollama")
+	if jcfg.Agent != "ollama" {
+		t.Errorf("Agent: got %q, want %q", jcfg.Agent, "ollama")
 	}
-	if jcfg.ModelID != "llama2" {
-		t.Errorf("ModelID: got %q, want %q", jcfg.ModelID, "llama2")
+	if jcfg.Model != "llama2" {
+		t.Errorf("Model: got %q, want %q", jcfg.Model, "llama2")
 	}
 	if jcfg.OllamaURL != "http://localhost:11434" {
 		t.Errorf("OllamaURL: got %q, want %q", jcfg.OllamaURL, "http://localhost:11434")

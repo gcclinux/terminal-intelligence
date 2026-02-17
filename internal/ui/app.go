@@ -14,6 +14,9 @@
 package ui
 
 import (
+	"fmt"
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/agentic"
@@ -438,15 +441,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "tab":
-			// Switch active pane (toggle between Editor and AI)
+			// Cycle through: Editor → AI Input → AI Response → Editor
 			if a.activePane == types.EditorPaneType {
+				// Switch from Editor to AI Input
 				a.activePane = types.AIPaneType
 				a.editorPane.focused = false
 				a.aiPane.focused = true
-			} else {
-				a.activePane = types.EditorPaneType
-				a.editorPane.focused = true
-				a.aiPane.focused = false
+				a.aiPane.SetActiveArea(0) // Set to Input area
+			} else if a.activePane == types.AIPaneType {
+				// Check which AI area is active
+				if a.aiPane.GetActiveArea() == 0 {
+					// Switch from AI Input to AI Response
+					a.aiPane.SetActiveArea(1) // Set to Response area
+				} else {
+					// Switch from AI Response back to Editor
+					a.activePane = types.EditorPaneType
+					a.editorPane.focused = true
+					a.aiPane.focused = false
+					a.aiPane.SetActiveArea(0) // Reset to Input area for next time
+				}
 			}
 			return a, nil
 
@@ -712,7 +725,7 @@ func (a *App) View() string {
 		Padding(0, 1)
 
 	// Simplified status bar - details available via Ctrl+H help
-	statusText := "Ctrl+H: Help | Ctrl+O: Open | Ctrl+S: Save | Tab: Switch Pane | Ctrl+Q: Quit"
+	statusText := "Ctrl+H: Help | Ctrl+O: Open | Ctrl+S: Save | Tab: Cycle Areas | Ctrl+Q: Quit"
 
 	// Add AI-specific instructions when AI pane is focused
 	if a.activePane == types.AIPaneType || a.activePane == types.AIResponsePaneType {
@@ -791,6 +804,75 @@ func (a *App) SetForceQuit(force bool) {
 // It retrieves the current file context, processes the message, and applies fixes or returns conversational responses
 // Requirements: 1.1, 4.1, 9.1, 9.2, 8.5
 func (a *App) handleAIMessage(message string) tea.Cmd {
+	// Check for special commands
+	trimmedMsg := strings.TrimSpace(strings.ToLower(message))
+	
+	// Handle /model command
+	if trimmedMsg == "/model" {
+		// Return current agent and model information
+		modelInfo := fmt.Sprintf("Agent: %s\nModel: %s", a.config.Provider, a.config.DefaultModel)
+		
+		// If agent is Gemini, also show the API key
+		if a.config.Provider == "gemini" && a.config.GeminiAPIKey != "" {
+			modelInfo += fmt.Sprintf("\nAPI Key: %s", a.config.GeminiAPIKey)
+		}
+		
+		return func() tea.Msg {
+			return AIResponseMsg{
+				Content: modelInfo,
+				Done:    true,
+			}
+		}
+	}
+	
+	// Handle /help command
+	if trimmedMsg == "/help" {
+		helpText := "Keyboard Shortcuts\n"
+		helpText += "==================\n\n"
+		helpText += "File\n"
+		helpText += "----\n"
+		helpText += "  Ctrl+O    Open file\n"
+		helpText += "  Ctrl+N    New file\n"
+		helpText += "  Ctrl+S    Save file\n"
+		helpText += "  Ctrl+X    Close file\n"
+		helpText += "  Ctrl+Q    Quit\n\n"
+		helpText += "AI\n"
+		helpText += "--\n"
+		helpText += "  Ctrl+Y    List code blocks\n"
+		helpText += "  Ctrl+P    Insert selected code into editor\n"
+		helpText += "  Ctrl+A    Insert full AI response into file\n"
+		helpText += "  Ctrl+T    Clear chat / New chat\n\n"
+		helpText += "Navigation\n"
+		helpText += "----------\n"
+		helpText += "  Tab       Switch between Editor, AI Input, and AI Response\n"
+		helpText += "  Up/Down   Scroll line by line\n"
+		helpText += "  PgUp/PgDn Scroll page\n"
+		helpText += "  Home/End  Jump to top/bottom\n"
+		helpText += "  Esc       Back\n\n"
+		helpText += "Agent Commands\n"
+		helpText += "--------------\n"
+		helpText += "  /fix      Force agentic mode (AI modifies code)\n"
+		helpText += "  /ask      Force conversational mode (no code changes)\n"
+		helpText += "  /preview  Preview changes before applying\n"
+		helpText += "  /model    Show current agent and model info\n"
+		helpText += "  /help     Show this help message\n\n"
+		helpText += "Fix Keywords\n"
+		helpText += "------------\n"
+		helpText += "  fix       Request code fix\n"
+		helpText += "  change    Request code modification\n"
+		helpText += "  update    Request code update\n"
+		helpText += "  modify    Request code modification\n"
+		helpText += "  correct   Request code correction\n\n"
+		helpText += "Use these keywords in your message to trigger agentic mode."
+		
+		return func() tea.Msg {
+			return AIResponseMsg{
+				Content: helpText,
+				Done:    true,
+			}
+		}
+	}
+	
 	// Step 1: Get file context from EditorPane using GetCurrentFile()
 	fileContext := a.editorPane.GetCurrentFile()
 	

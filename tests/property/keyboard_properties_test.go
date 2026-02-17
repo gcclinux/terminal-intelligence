@@ -33,27 +33,37 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			msg := ui.WindowSizeMsg{Width: width, Height: height}
 			_, _ = app.Update(msg)
 
-			// Get initial active pane
+			// Get initial active pane (should be Editor)
 			initialPane := app.GetActivePane()
 
-			// Press tab
+			// Press tab - should switch to AI Input
 			keyMsg := tea.KeyMsg{Type: tea.KeyTab}
 			_, _ = app.Update(keyMsg)
 
-			// Verify active pane changed
+			// Verify active pane changed to AI
 			newPane := app.GetActivePane()
 			if newPane == initialPane {
 				t.Logf("Tab should switch active pane")
 				return false
 			}
 
-			// Press tab again
+			// Press tab again - should switch to AI Response (still AI pane)
 			_, _ = app.Update(keyMsg)
 
-			// Verify active pane switched back
+			// Verify still in AI pane
+			secondPane := app.GetActivePane()
+			if secondPane != newPane {
+				t.Logf("Second tab should stay in AI pane (response area)")
+				return false
+			}
+
+			// Press tab again - should switch back to Editor
+			_, _ = app.Update(keyMsg)
+
+			// Verify active pane switched back to initial
 			finalPane := app.GetActivePane()
 			if finalPane != initialPane {
-				t.Logf("Second tab should switch back to initial pane")
+				t.Logf("Third tab should switch back to initial pane")
 				return false
 			}
 

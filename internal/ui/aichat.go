@@ -118,6 +118,11 @@ func (a *AIChatPane) SetActiveArea(area int) {
 	a.activeArea = area
 }
 
+// GetActiveArea returns the current active area (0: Input, 1: Response).
+func (a *AIChatPane) GetActiveArea() int {
+	return a.activeArea
+}
+
 // SendMessage sends a message to the AI with optional code context.
 // Adds the user message to history and initiates streaming AI generation.
 // If context is provided, it's included in the prompt as a code block.

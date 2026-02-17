@@ -77,10 +77,21 @@ The right pane is now split horizontally:
 - Scroll with **Up/Down** arrows
 - Use **PgUp/PgDown** for faster scrolling
 
-### 4. Switching Between Panes
+**AI Commands:**
+- `/fix <request>` - Force agentic mode (AI will modify code)
+- `/ask <question>` - Force conversational mode (AI won't modify code)
+- `/preview <request>` - Preview changes before applying them
+- `/model` - Display current agent, model, and API key (for Gemini)
+- `/help` - Display keyboard shortcuts and agent commands
 
-- Press **Tab** to switch between Editor (left) and AI (right) panes
-- The active pane has a blue border
+### 4. Switching Between Areas
+
+- Press **Tab** to cycle through three areas:
+  1. **Editor** (left pane) - Edit your code
+  2. **AI Input** (right pane, top) - Type messages to AI
+  3. **AI Response** (right pane, bottom) - Read AI responses and scroll
+- The active area has a blue border
+- When in AI Response area, use arrow keys to scroll through messages
 
 ### 5. Sending Code to AI
 
@@ -94,7 +105,7 @@ The right pane is now split horizontally:
 | **Ctrl+O** | Open file |
 | **Ctrl+N** | New file |
 | **Ctrl+S** | Save current file |
-| **Tab** | Switch between panes |
+| **Tab** | Cycle between Editor, AI Input, and AI Response |
 | **Ctrl+Enter** | Send AI message with code context |
 | **Ctrl+Q** | Quit (will prompt if unsaved changes) |
 | **Esc** | Cancel dialogs |

@@ -50,7 +50,7 @@ func (a *App) renderHelpDialog() string {
 
 	// Navigation section
 	helpText += sectionStyle.Render("── Navigation ────────────────────────") + "\n"
-	helpText += keyStyle.Render("  Tab") + descStyle.Render("       Switch pane") + "\n"
+	helpText += keyStyle.Render("  Tab") + descStyle.Render("       Cycle: Editor → AI Input → AI Response") + "\n"
 	helpText += keyStyle.Render("  ↑↓") + descStyle.Render("        Scroll line by line") + "\n"
 	helpText += keyStyle.Render("  PgUp/PgDn") + descStyle.Render(" Scroll page") + "\n"
 	helpText += keyStyle.Render("  Home/End") + descStyle.Render("  Jump to top/bottom") + "\n"

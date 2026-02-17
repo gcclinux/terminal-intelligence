@@ -154,7 +154,7 @@ func TestApp_FocusStateManagement(t *testing.T) {
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
 		_, _ = app.Update(msg)
 
-		// Press tab to switch focus to AI pane
+		// Press tab to switch focus to AI pane (Input area)
 		keyMsg := tea.KeyMsg{Type: tea.KeyTab}
 		_, _ = app.Update(keyMsg)
 
@@ -162,18 +162,25 @@ func TestApp_FocusStateManagement(t *testing.T) {
 			t.Errorf("Expected focus on AI pane after tab, got %v", app.GetActivePane())
 		}
 
+		// Press tab again to switch to AI Response area (still AI pane)
+		_, _ = app.Update(keyMsg)
+
+		if app.GetActivePane() != types.AIPaneType {
+			t.Errorf("Expected focus on AI pane (response) after second tab, got %v", app.GetActivePane())
+		}
+
 		// Press tab again to switch back to Editor
 		_, _ = app.Update(keyMsg)
 
 		if app.GetActivePane() != types.EditorPaneType {
-			t.Errorf("Expected focus on editor after second tab, got %v", app.GetActivePane())
+			t.Errorf("Expected focus on editor after third tab, got %v", app.GetActivePane())
 		}
 
-		// Press tab again to switch to AI pane
+		// Press tab again to cycle back to AI Input
 		_, _ = app.Update(keyMsg)
 
 		if app.GetActivePane() != types.AIPaneType {
-			t.Errorf("Expected focus on AI pane after third tab, got %v", app.GetActivePane())
+			t.Errorf("Expected focus on AI pane after fourth tab, got %v", app.GetActivePane())
 		}
 	})
 }

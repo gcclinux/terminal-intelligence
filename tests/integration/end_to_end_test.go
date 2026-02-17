@@ -139,7 +139,7 @@ func TestEndToEnd_PaneSwitchingWorkflow(t *testing.T) {
 			t.Error("Expected editor pane to be active initially")
 		}
 
-		// Switch to AI pane
+		// Switch to AI pane (Input area)
 		keyMsg := tea.KeyMsg{Type: tea.KeyTab}
 		_, _ = app.Update(keyMsg)
 
@@ -147,11 +147,18 @@ func TestEndToEnd_PaneSwitchingWorkflow(t *testing.T) {
 			t.Error("Expected AI pane to be active after tab")
 		}
 
+		// Switch to AI Response area (still AI pane)
+		_, _ = app.Update(keyMsg)
+
+		if app.GetActivePane() != types.AIPaneType {
+			t.Error("Expected AI pane (response) to be active after second tab")
+		}
+
 		// Switch back to editor
 		_, _ = app.Update(keyMsg)
 
 		if app.GetActivePane() != types.EditorPaneType {
-			t.Error("Expected editor pane to be active after second tab")
+			t.Error("Expected editor pane to be active after third tab")
 		}
 	})
 }

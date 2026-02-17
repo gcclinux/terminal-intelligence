@@ -2,6 +2,8 @@
 
 A lightweight CLI-based IDE with integrated AI assistance through Ollama. Features a split-window terminal interface with an integrated code editor and AI assistant for creating, editing, and testing scripts and markdown documents.
 
+![Terminal Intelligence Preview](images/ti-1stview.png)
+
 ## Features
 
 - **Split-Window Interface**: Vertical split with editor on the left and AI assistant on the right
@@ -48,6 +50,8 @@ Your file is marked as modified but not automatically saved, giving you full con
 - `/fix <your request>` - Force agentic mode (AI will modify code)
 - `/ask <your question>` - Force conversational mode (AI won't modify code)
 - `/preview <your request>` - Preview changes before applying them
+- `/model` - Display current agent and model information
+- `/help` - Display keyboard shortcuts and agent commands
 
 ### Usage Examples
 
@@ -82,6 +86,25 @@ You: /preview refactor this to use a switch statement
 ```
 
 The AI shows you what changes it would make before applying them. You can then approve or request modifications.
+
+#### Using /model Command
+
+```
+You: /model
+```
+
+The AI displays the current agent (ollama or gemini) and model being used (e.g., llama2, gemini-2.5-flash-lite). If using Gemini, it also displays the API key from the configuration.
+
+#### Using /help Command
+
+```
+You: /help
+```
+
+The AI displays a comprehensive help message including:
+- All keyboard shortcuts (same as Ctrl+H)
+- Agent commands (/fix, /ask, /preview, /model, /help)
+- Fix keywords (fix, change, update, modify, correct) with descriptions
 
 #### Multiple Changes
 
@@ -131,6 +154,7 @@ Agentic code fixing works with:
 - Shell scripts (`.sh`)
 - PowerShell scripts (`.ps1`)
 - Markdown documents (`.md`)
+- Python scripts (`.py`)
 
 ## Requirements
 
@@ -176,8 +200,8 @@ You can edit this file to customize your settings. The application will load it 
 
 ```json
 {
-  "genai_type": "ollama",
-  "model_id": "llama2",
+  "agent": "ollama",
+  "model": "llama2",
   "ollama_url": "http://localhost:11434",
   "gemini_api": "",
   "workspace": "/home/user/ti-workspace"
@@ -188,8 +212,8 @@ You can edit this file to customize your settings. The application will load it 
 
 ```json
 {
-  "genai_type": "gemini",
-  "model_id": "gemini-2.5-flash-lite",
+  "agent": "gemini",
+  "model": "gemini-2.5-flash-lite",
   "ollama_url": "",
   "gemini_api": "your-api-key-here",
   "workspace": "/home/user/project-workspace"
@@ -198,8 +222,8 @@ You can edit this file to customize your settings. The application will load it 
 
 **Configuration Fields:**
 
-- `genai_type`: AI provider - `"ollama"` or `"gemini"`
-- `model_id`: Model name (e.g., `"llama2"`, `"qwen2.5-coder:3b"`, `"gemini-2.5-flash-lite"`)
+- `agent`: AI provider - `"ollama"` or `"gemini"`
+- `model`: Model name (e.g., `"llama2"`, `"qwen2.5-coder:3b"`, `"gemini-2.5-flash-lite"`)
 - `ollama_url`: Ollama server URL (only for Ollama provider)
 - `gemini_api`: Gemini API key (required for Gemini provider)
 - `workspace`: Workspace directory path (absolute path to your workspace folder)
@@ -216,11 +240,14 @@ You can edit this file to customize your settings. The application will load it 
 
 | Shortcut | Action |
 |----------|--------|
-| `Tab` | Switch between editor and AI pane |
+| `Tab` | Cycle between Editor, AI Input, and AI Response areas |
 | `Ctrl+S` | Save current file |
 | `Ctrl+R` | Execute current script |
 | `Ctrl+Enter` | Send message to AI |
+| `Ctrl+H` | Show help dialog with all shortcuts |
 | `Ctrl+C` or `Ctrl+Q` | Quit application |
+
+Note: You can also type `/help` in the AI chat to see all keyboard shortcuts and agent commands.
 
 ### Workflow Example
 

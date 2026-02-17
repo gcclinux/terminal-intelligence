@@ -30,7 +30,7 @@ import (
 // - UserMessage must not be empty
 // - FileContent may be empty (for new files)
 // - FilePath must be a valid path string
-// - FileType must be one of: "bash", "shell", "powershell", "markdown"
+// - FileType must be one of: "bash", "shell", "powershell", "markdown", "python"
 // - PreviewMode indicates whether to show changes without applying them
 type FixRequest struct {
 	UserMessage string
@@ -55,10 +55,11 @@ func (fr *FixRequest) Validate() error {
 		"shell":      true,
 		"powershell": true,
 		"markdown":   true,
+		"python":     true,
 	}
 	
 	if !validFileTypes[fr.FileType] {
-		return fmt.Errorf("FileType must be one of: bash, shell, powershell, markdown; got: %s", fr.FileType)
+		return fmt.Errorf("FileType must be one of: bash, shell, powershell, markdown, python; got: %s", fr.FileType)
 	}
 	
 	return nil
