@@ -88,7 +88,7 @@ func TestToJSON_RoundTrip(t *testing.T) {
 func TestApplyToAppConfig_SetsNonEmptyFields(t *testing.T) {
 	jcfg := &JSONConfig{
 		Agent:     "gemini",
-		Model:     "flash",
+		GModel:    "flash",
 		GeminiAPI: "key123",
 	}
 	appCfg := types.DefaultConfig()
@@ -150,7 +150,7 @@ func TestReq1_LoadConfigFromJSON_AllFields(t *testing.T) {
 	path := filepath.Join(dir, "ti.json")
 	content := []byte(`{
 		"agent": "gemini",
-		"model": "gemini-2.0-flash-exp",
+		"gmodel": "gemini-2.0-flash-exp",
 		"ollama_url": "http://custom:11434",
 		"gemini_api": "test-api-key",
 		"workspace": "/tmp/my-workspace"

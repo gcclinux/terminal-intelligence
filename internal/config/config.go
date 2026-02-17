@@ -13,6 +13,7 @@ import (
 type JSONConfig struct {
 	Agent     string `json:"agent"`
 	Model     string `json:"model"`
+	GModel    string `json:"gmodel"`
 	OllamaURL string `json:"ollama_url"`
 	GeminiAPI string `json:"gemini_api"`
 	Workspace string `json:"workspace"`
@@ -58,8 +59,16 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 	if jcfg.Agent != "" {
 		appCfg.Provider = jcfg.Agent
 	}
-	if jcfg.Model != "" {
-		appCfg.DefaultModel = jcfg.Model
+	// Use gmodel for gemini, model for ollama
+	switch jcfg.Agent {
+	case "gemini":
+		if jcfg.GModel != "" {
+			appCfg.DefaultModel = jcfg.GModel
+		}
+	default:
+		if jcfg.Model != "" {
+			appCfg.DefaultModel = jcfg.Model
+		}
 	}
 	if jcfg.OllamaURL != "" {
 		appCfg.OllamaURL = jcfg.OllamaURL
@@ -71,15 +80,21 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 		appCfg.WorkspaceDir = jcfg.Workspace
 	}
 }
+
 // AppConfigToJSONConfig converts an AppConfig into a JSONConfig for serialization.
 func AppConfigToJSONConfig(appCfg *types.AppConfig) *JSONConfig {
-	return &JSONConfig{
+	jcfg := &JSONConfig{
 		Agent:     appCfg.Provider,
-		Model:     appCfg.DefaultModel,
 		OllamaURL: appCfg.OllamaURL,
 		GeminiAPI: appCfg.GeminiAPIKey,
 		Workspace: appCfg.WorkspaceDir,
 	}
+	if appCfg.Provider == "gemini" {
+		jcfg.GModel = appCfg.DefaultModel
+	} else {
+		jcfg.Model = appCfg.DefaultModel
+	}
+	return jcfg
 }
 
 // ConfigFilePath returns the expected config file path in the user's home directory.
@@ -91,6 +106,7 @@ func ConfigFilePath() (string, error) {
 	}
 	return filepath.Join(homeDir, ".ti", "config.json"), nil
 }
+
 // CreateDefaultConfig creates a default config.json file with example values.
 // Returns the path where the file was created.
 func CreateDefaultConfig() (string, error) {
@@ -110,6 +126,7 @@ func CreateDefaultConfig() (string, error) {
 	defaultConfig := &JSONConfig{
 		Agent:     "ollama",
 		Model:     "llama2",
+		GModel:    "gemini-3-pro-preview",
 		OllamaURL: "http://localhost:11434",
 		GeminiAPI: "",
 		Workspace: filepath.Join(homeDir, "ti-workspace"),

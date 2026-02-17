@@ -34,16 +34,16 @@ import (
 // The editor tracks modifications by comparing current content with originalContent.
 // This enables the exit confirmation dialog and modified indicator (*) in the title bar.
 type EditorPane struct {
-	content         string                       // Current editor content
-	originalContent string                       // Original content for unsaved changes detection
-	cursorLine      int                          // Current cursor line (0-indexed)
-	cursorCol       int                          // Current cursor column (0-indexed)
-	scrollOffset    int                          // Vertical scroll offset
-	currentFile     *types.FileMetadata          // Current file metadata (nil if no file open)
-	fileManager     *filemanager.FileManager     // File system operations
-	width           int                          // Pane width
-	height          int                          // Pane height
-	focused         bool                         // Whether this pane is focused
+	content         string                   // Current editor content
+	originalContent string                   // Original content for unsaved changes detection
+	cursorLine      int                      // Current cursor line (0-indexed)
+	cursorCol       int                      // Current cursor column (0-indexed)
+	scrollOffset    int                      // Vertical scroll offset
+	currentFile     *types.FileMetadata      // Current file metadata (nil if no file open)
+	fileManager     *filemanager.FileManager // File system operations
+	width           int                      // Pane width
+	height          int                      // Pane height
+	focused         bool                     // Whether this pane is focused
 }
 
 // NewEditorPane creates a new editor pane.
@@ -131,6 +131,7 @@ func (e *EditorPane) SaveFile() error {
 
 	return nil
 }
+
 // CloseFile closes the current file and clears the editor
 func (e *EditorPane) CloseFile() {
 	e.content = ""
@@ -585,6 +586,9 @@ func determineFileType(filepath string) string {
 	}
 	if strings.HasSuffix(filepath, ".md") {
 		return "markdown"
+	}
+	if strings.HasSuffix(filepath, ".py") {
+		return "python"
 	}
 	return "shell"
 }
