@@ -14,7 +14,7 @@ func TestSession_ExitWithUnsavedChanges(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -61,7 +61,7 @@ func TestSession_ExitWithUnsavedChanges(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -102,7 +102,7 @@ func TestSession_ExitWithUnsavedChanges(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -150,7 +150,7 @@ func TestSession_ExitWithUnsavedChanges(t *testing.T) {
 	})
 
 	t.Run("exits immediately without unsaved changes", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -175,7 +175,7 @@ func TestSession_ExitWithUnsavedChanges(t *testing.T) {
 // TestSession_AIHistoryClearing tests AI conversation history clearing
 func TestSession_AIHistoryClearing(t *testing.T) {
 	t.Run("clears AI history on normal exit", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -205,7 +205,7 @@ func TestSession_AIHistoryClearing(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -251,7 +251,7 @@ func TestSession_AIHistoryClearing(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -303,7 +303,7 @@ func TestSession_ExitConfirmationDialog(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize and create unsaved changes
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -329,7 +329,7 @@ func TestSession_ExitConfirmationDialog(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize and create unsaved changes
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -359,7 +359,7 @@ func TestSession_ExitConfirmationDialog(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize and create unsaved changes
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}

@@ -226,7 +226,7 @@ func TestProperty_TerminalResizeProportionalAdjustment(t *testing.T) {
 			}
 
 			// Create app with default config
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Simulate window size message
 			msg := ui.WindowSizeMsg{Width: width, Height: height}
@@ -285,7 +285,7 @@ func TestProperty_ActivePaneVisualIndication(t *testing.T) {
 			}
 
 			// Create app with default config
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Set terminal size
 			msg := ui.WindowSizeMsg{Width: width, Height: height}

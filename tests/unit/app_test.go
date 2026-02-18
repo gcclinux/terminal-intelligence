@@ -11,7 +11,7 @@ import (
 // TestApp_New tests the creation of a new App instance
 func TestApp_New(t *testing.T) {
 	t.Run("with default config", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		if app == nil {
 			t.Fatal("Expected app to be created, got nil")
 		}
@@ -25,7 +25,7 @@ func TestApp_New(t *testing.T) {
 		config := types.DefaultConfig()
 		config.OllamaURL = "http://custom:11434"
 
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		if app == nil {
 			t.Fatal("Expected app to be created, got nil")
 		}
@@ -78,7 +78,7 @@ func TestApp_PaneSizeCalculations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Send window size message
 			msg := tea.WindowSizeMsg{
@@ -119,7 +119,7 @@ func TestApp_PaneSizeCalculations(t *testing.T) {
 // TestApp_FocusStateManagement tests focus state management
 func TestApp_FocusStateManagement(t *testing.T) {
 	t.Run("initial focus on editor", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		if app.GetActivePane() != types.EditorPaneType {
 			t.Errorf("Expected initial focus on editor, got %v", app.GetActivePane())
@@ -127,7 +127,7 @@ func TestApp_FocusStateManagement(t *testing.T) {
 	})
 
 	t.Run("switch focus to AI pane", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		app.SetActivePane(types.AIPaneType)
 
@@ -137,7 +137,7 @@ func TestApp_FocusStateManagement(t *testing.T) {
 	})
 
 	t.Run("switch focus back to editor", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		app.SetActivePane(types.AIPaneType)
 		app.SetActivePane(types.EditorPaneType)
@@ -148,7 +148,7 @@ func TestApp_FocusStateManagement(t *testing.T) {
 	})
 
 	t.Run("tab key switches focus", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -188,7 +188,7 @@ func TestApp_FocusStateManagement(t *testing.T) {
 // TestApp_TerminalResizeHandling tests terminal resize handling
 func TestApp_TerminalResizeHandling(t *testing.T) {
 	t.Run("resize from small to large", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Start with small size
 		msg1 := tea.WindowSizeMsg{Width: 40, Height: 20}
@@ -209,7 +209,7 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 	})
 
 	t.Run("resize from large to small", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Start with large size
 		msg1 := tea.WindowSizeMsg{Width: 160, Height: 50}
@@ -230,7 +230,7 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 	})
 
 	t.Run("multiple resizes", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		sizes := []struct {
 			width  int
@@ -260,7 +260,7 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 // TestApp_View tests the View rendering
 func TestApp_View(t *testing.T) {
 	t.Run("view before initialization", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		view := app.View()
 		if view != "Initializing..." {
@@ -269,7 +269,7 @@ func TestApp_View(t *testing.T) {
 	})
 
 	t.Run("view after initialization", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -285,7 +285,7 @@ func TestApp_View(t *testing.T) {
 	})
 
 	t.Run("view changes with focus", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -312,7 +312,7 @@ func TestApp_View(t *testing.T) {
 // TestApp_KeyboardControls tests keyboard control handling
 func TestApp_KeyboardControls(t *testing.T) {
 	t.Run("ctrl+c quits", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -329,7 +329,7 @@ func TestApp_KeyboardControls(t *testing.T) {
 	})
 
 	t.Run("ctrl+q quits", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -351,7 +351,7 @@ func TestApp_KeyboardControls(t *testing.T) {
 // use the newly opened file's content for subsequent fix requests
 func TestApp_FileSwitchingUpdatesContext(t *testing.T) {
 	t.Run("context updates when switching files", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -406,7 +406,7 @@ func TestApp_FileSwitchingUpdatesContext(t *testing.T) {
 	})
 
 	t.Run("context is nil when no file is open", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -423,7 +423,7 @@ func TestApp_FileSwitchingUpdatesContext(t *testing.T) {
 	})
 
 	t.Run("context includes unsaved changes", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -453,7 +453,7 @@ func TestApp_FileSwitchingUpdatesContext(t *testing.T) {
 	})
 
 	t.Run("rapid file switching maintains correct context", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize with window size
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}

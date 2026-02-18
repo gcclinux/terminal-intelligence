@@ -13,6 +13,9 @@ import (
 
 const version = "0.1.0"
 
+// Build number (injected at compile time via -ldflags)
+var buildNumber = "dev"
+
 func main() {
 	// Define CLI flags
 	workspaceDir := flag.String("workspace", "", "Workspace directory for file operations (default: ~/ti-workspace)")
@@ -124,7 +127,7 @@ func main() {
 	}
 
 	// Create the application
-	app := ui.New(appCfg)
+	app := ui.New(appCfg, buildNumber)
 
 	// Start the Bubble Tea program
 	p := tea.NewProgram(app, tea.WithAltScreen())

@@ -11,7 +11,7 @@ import (
 // TestKeyboard_TabSwitchesPanes tests tab key pane switching
 func TestKeyboard_TabSwitchesPanes(t *testing.T) {
 	t.Run("tab switches from editor to AI", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -33,7 +33,7 @@ func TestKeyboard_TabSwitchesPanes(t *testing.T) {
 	})
 
 	t.Run("tab cycles through all three areas", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -72,7 +72,7 @@ func TestKeyboard_TabSwitchesPanes(t *testing.T) {
 	})
 
 	t.Run("multiple tab presses cycle through three areas", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -105,7 +105,7 @@ func TestKeyboard_CtrlSSavesFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -148,7 +148,7 @@ func TestKeyboard_CtrlSSavesFile(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -168,7 +168,7 @@ func TestKeyboard_CtrlSSavesFile(t *testing.T) {
 	})
 
 	t.Run("ctrl+s with no file loaded", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -188,7 +188,7 @@ func TestKeyboard_CtrlSSavesFile(t *testing.T) {
 // TestKeyboard_CtrlRExecutesScript tests ctrl+r script execution
 func TestKeyboard_CtrlRExecutesScript(t *testing.T) {
 	t.Run("ctrl+r is handled", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -208,7 +208,7 @@ func TestKeyboard_CtrlRExecutesScript(t *testing.T) {
 // TestKeyboard_CtrlEnterSendsAIMessage tests ctrl+enter AI message sending
 func TestKeyboard_CtrlEnterSendsAIMessage(t *testing.T) {
 	t.Run("ctrl+enter sends message when AI pane is active", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -228,7 +228,7 @@ func TestKeyboard_CtrlEnterSendsAIMessage(t *testing.T) {
 	})
 
 	t.Run("ctrl+enter does nothing when editor is active", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -248,7 +248,7 @@ func TestKeyboard_CtrlEnterSendsAIMessage(t *testing.T) {
 // TestKeyboard_QuitShortcuts tests quit shortcuts
 func TestKeyboard_QuitShortcuts(t *testing.T) {
 	t.Run("ctrl+c returns quit command", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -264,7 +264,7 @@ func TestKeyboard_QuitShortcuts(t *testing.T) {
 	})
 
 	t.Run("ctrl+q returns quit command", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 		
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}

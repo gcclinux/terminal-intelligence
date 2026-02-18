@@ -14,7 +14,7 @@ func TestEndToEnd_CreateEditSaveWorkflow(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -79,7 +79,7 @@ func TestEndToEnd_AIInteractionWithCodeContext(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -128,7 +128,7 @@ func TestEndToEnd_AIInteractionWithCodeContext(t *testing.T) {
 // TestEndToEnd_PaneSwitchingWorkflow tests switching between panes
 func TestEndToEnd_PaneSwitchingWorkflow(t *testing.T) {
 	t.Run("switch between editor and AI pane", func(t *testing.T) {
-		app := ui.New(nil)
+		app := ui.New(nil, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -169,7 +169,7 @@ func TestEndToEnd_ErrorRecoveryScenarios(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -194,7 +194,7 @@ func TestEndToEnd_ErrorRecoveryScenarios(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -217,7 +217,7 @@ func TestEndToEnd_MultipleFileEditing(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -276,7 +276,7 @@ func TestEndToEnd_ExitWorkflow(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize
 		msg := tea.WindowSizeMsg{Width: 80, Height: 24}
@@ -322,7 +322,7 @@ func TestEndToEnd_TerminalResizeHandling(t *testing.T) {
 		tmpDir := t.TempDir()
 		config := types.DefaultConfig()
 		config.WorkspaceDir = tmpDir
-		app := ui.New(config)
+		app := ui.New(config, "test")
 
 		// Initialize with initial size
 		msg1 := tea.WindowSizeMsg{Width: 80, Height: 24}

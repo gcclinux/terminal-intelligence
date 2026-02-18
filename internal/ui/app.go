@@ -68,6 +68,7 @@ type App struct {
 	forceQuit            bool                       // Whether to quit without save confirmation
 	statusMessage        string                     // Status bar message
 	pendingCodeInsert    string                     // Code waiting to be inserted after file creation
+	buildNumber          string                     // Build number from git commits
 }
 
 // New creates a new application instance with the provided configuration.
@@ -87,7 +88,25 @@ type App struct {
 //
 // Returns:
 //   - *App: Initialized application instance
-func New(config *types.AppConfig) *App {
+// New creates a new application instance with the provided configuration.
+// If config is nil, uses default configuration.
+//
+// Initialization process:
+//   1. Creates FileManager for file system operations
+//   2. Creates AI client based on provider (Ollama or Gemini)
+//   3. Initializes AgenticCodeFixer with AI client and model
+//   4. Creates EditorPane and AIChatPane components
+//   5. Sets initial state (editor pane active, no dialogs showing)
+//
+// The returned App is ready to be run with Bubble Tea's tea.NewProgram().
+//
+// Parameters:
+//   - config: Application configuration (provider, model, API keys, workspace directory)
+//   - buildNumber: Build number from git commits
+//
+// Returns:
+//   - *App: Initialized application instance
+func New(config *types.AppConfig, buildNumber string) *App {
 	if config == nil {
 		config = types.DefaultConfig()
 	}
@@ -117,6 +136,7 @@ func New(config *types.AppConfig) *App {
 		ready:                false,
 		showExitConfirmation: false,
 		forceQuit:            false,
+		buildNumber:          buildNumber,
 	}
 }
 
@@ -602,13 +622,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // Returns:
 //   - string: Rendered header with styling and border
+// renderHeader renders the application header with logo.
+// Displays binary "TI" on the left, "TERMINAL INTELLIGENCE (TI)" centered, and "Build: XXX" on the right.
+// The header is wrapped in a blue rounded border.
+//
+// Layout:
+//   Left: 01010100 01001001 (binary for "TI")
+//   Center: TERMINAL INTELLIGENCE (TI)
+//   Right: Build: XXX (git commit count)
 func (a *App) renderHeader() string {
-	// Binary code for "CLI" on the right side
+	// Binary code for "TI" on the left side
+	// T = 84 (0x54) = 01010100
+	// I = 73 (0x49) = 01001001
 	binaryStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("15"))
 
-	binary := binaryStyle.Render("01000011 01001100 01001001")
+	binaryTI := binaryStyle.Render("01010100 01001001")
 
 	// Create the TI title (centered)
 	titleStyle := lipgloss.NewStyle().
@@ -617,26 +647,44 @@ func (a *App) renderHeader() string {
 
 	title := titleStyle.Render("TERMINAL INTELLIGENCE (TI)")
 
+	// Create the build number (right side)
+	buildText := fmt.Sprintf("Build: %03s", a.buildNumber)
+	buildStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("15"))
+
+	build := buildStyle.Render(buildText)
+
 	// Calculate available width for content (accounting for border and padding)
 	contentWidth := a.width - 8
-	binaryLen := len("01000011 01001100 01001001")
+	binaryLen := len("01010100 01001001")
 	titleLen := len("TERMINAL INTELLIGENCE (TI)")
+	buildLen := len(buildText)
 
-	// Calculate left padding to center the title
-	leftPadding := (contentWidth - titleLen) / 2
+	// Calculate spacing
+	// Left: binary + space
+	// Center: title
+	// Right: space + build
+	totalContentLen := binaryLen + titleLen + buildLen
+	availableSpace := contentWidth - totalContentLen
 
-	// Calculate right padding (space between title and binary)
-	rightPadding := contentWidth - leftPadding - titleLen - binaryLen
-	if rightPadding < 1 {
-		rightPadding = 1
+	// Distribute space: half before title, half after title
+	leftSpace := availableSpace / 2
+	rightSpace := availableSpace - leftSpace
+
+	if leftSpace < 1 {
+		leftSpace = 1
+	}
+	if rightSpace < 1 {
+		rightSpace = 1
 	}
 
 	// Create spacing
-	leftSpace := lipgloss.NewStyle().Width(leftPadding).Render("")
-	rightSpace := lipgloss.NewStyle().Width(rightPadding).Render("")
+	leftSpaceStr := lipgloss.NewStyle().Width(leftSpace).Render("")
+	rightSpaceStr := lipgloss.NewStyle().Width(rightSpace).Render("")
 
-	// Combine: left padding + title + right padding + binary
-	headerContent := lipgloss.JoinHorizontal(lipgloss.Top, leftSpace, title, rightSpace, binary)
+	// Combine: binary + left space + title + right space + build
+	headerContent := lipgloss.JoinHorizontal(lipgloss.Top, binaryTI, leftSpaceStr, title, rightSpaceStr, build)
 
 	// Create blue border around header
 	headerStyle := lipgloss.NewStyle().

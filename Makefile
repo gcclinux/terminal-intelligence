@@ -5,7 +5,8 @@ BINARY_NAME=ti
 VERSION=0.1.0
 BUILD_DIR=build
 GO=go
-GOFLAGS=-ldflags="-s -w -X main.version=$(VERSION)"
+BUILD_NUMBER=$(shell echo $$(($(shell git rev-list --count HEAD 2>/dev/null || echo "0") + 1)))
+GOFLAGS=-ldflags="-s -w -X main.version=$(VERSION) -X main.buildNumber=$(BUILD_NUMBER)"
 
 # Default target
 all: test build

@@ -27,7 +27,7 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			}
 
 			// Create app
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Initialize with window size
 			msg := ui.WindowSizeMsg{Width: width, Height: height}
@@ -84,7 +84,7 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			tmpDir := t.TempDir()
 			config := types.DefaultConfig()
 			config.WorkspaceDir = tmpDir
-			app := ui.New(config)
+			app := ui.New(config, "test")
 
 			// Initialize with window size
 			msg := ui.WindowSizeMsg{Width: width, Height: height}
@@ -141,7 +141,7 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			}
 
 			// Create app
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Initialize with window size
 			msg := ui.WindowSizeMsg{Width: width, Height: height}
@@ -171,7 +171,7 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			}
 
 			// Create app
-			app := ui.New(nil)
+			app := ui.New(nil, "test")
 
 			// Initialize with window size
 			msg := ui.WindowSizeMsg{Width: width, Height: height}

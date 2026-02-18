@@ -15,7 +15,7 @@ func TestModelCommand(t *testing.T) {
 		config.Provider = "ollama"
 		config.DefaultModel = "llama2"
 
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		if app == nil {
 			t.Fatal("Expected app to be created, got nil")
 		}
@@ -37,7 +37,7 @@ func TestModelCommand(t *testing.T) {
 		config.DefaultModel = "gemini-2.5-flash-lite"
 		config.GeminiAPIKey = "test-api-key-12345"
 
-		app := ui.New(config)
+		app := ui.New(config, "test")
 		if app == nil {
 			t.Fatal("Expected app to be created, got nil")
 		}
