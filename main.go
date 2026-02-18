@@ -115,9 +115,21 @@ func main() {
 
 	if *workspaceDir != "" {
 		appCfg.WorkspaceDir = *workspaceDir
+	} else {
+		// Default workspace to current working directory
+		cwd, err := os.Getwd()
+		if err == nil {
+			appCfg.WorkspaceDir = cwd
+		}
 	}
 	if *model != "" {
 		appCfg.DefaultModel = *model
+	}
+
+	// Save updated workspace back to config.json
+	jcfgToSave := config.AppConfigToJSONConfig(appCfg)
+	if data, err := config.ToJSON(jcfgToSave); err == nil {
+		_ = os.WriteFile(configPath, data, 0644)
 	}
 
 	// Create workspace directory if it doesn't exist

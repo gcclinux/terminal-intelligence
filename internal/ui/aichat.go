@@ -210,6 +210,7 @@ func (a *AIChatPane) DisplayResponse(response string) {
 	// Auto-scroll to bottom
 	a.scrollToBottom()
 }
+
 // DisplayNotification displays a change notification in the chat pane with distinct formatting.
 // Used by AgenticCodeFixer to show fix results with cyan color and notification label.
 // Adds the notification to conversation history and scrolls to bottom.
@@ -803,9 +804,37 @@ func (a *AIChatPane) View() string {
 		return a.renderCopyMode()
 	}
 
-	// Calculate heights - input gets fixed 3 lines, rest for responses
-	inputHeight := 3
-	responseHeight := a.height - inputHeight // Remove spacing to match editor height
+	// Calculate heights - input gets fixed 3 lines max, rest for responses
+	maxInputLines := 3
+	inputWidth := a.width - 8 // Account for border, padding, and "TI> " prefix
+	if inputWidth < 10 {
+		inputWidth = 10
+	}
+
+	// Calculate how many lines the input will actually take
+	promptText := "TI> " + a.inputBuffer
+	if a.focused && a.activeArea == 0 {
+		promptText += "█" // Cursor
+	}
+
+	// Wrap text to fit width and count lines
+	wrappedLines := wrapText(promptText, inputWidth)
+	actualInputLines := len(wrappedLines)
+
+	// Cap at max input lines and truncate if needed
+	if actualInputLines > maxInputLines {
+		wrappedLines = wrappedLines[:maxInputLines]
+		actualInputLines = maxInputLines
+	}
+
+	// Ensure at least 1 line
+	if actualInputLines < 1 {
+		actualInputLines = 1
+	}
+
+	// Input height includes border (2 lines) + content lines
+	inputHeight := actualInputLines + 2
+	responseHeight := a.height - inputHeight
 
 	if responseHeight < 5 {
 		responseHeight = 5
@@ -816,7 +845,7 @@ func (a *AIChatPane) View() string {
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1).
 		Width(a.width - 4).
-		Height(inputHeight - 2) // Account for border
+		Height(actualInputLines) // Exact height for content
 
 	if a.focused && a.activeArea == 0 {
 		inputStyle = inputStyle.BorderForeground(lipgloss.Color("62"))
@@ -824,11 +853,7 @@ func (a *AIChatPane) View() string {
 		inputStyle = inputStyle.BorderForeground(lipgloss.Color("240"))
 	}
 
-	promptText := "TI> " + a.inputBuffer
-	if a.focused && a.activeArea == 0 {
-		promptText += "█" // Cursor
-	}
-	inputArea := inputStyle.Render(promptText)
+	inputArea := inputStyle.Render(strings.Join(wrappedLines, "\n"))
 
 	// Render response area
 	visibleLines := responseHeight - 5 // Account for title and borders (increased subtraction to match editor height)
@@ -1293,42 +1318,42 @@ func (a *AIChatPane) EnterConfigMode(fields []string, values []string) {
 func (a *AIChatPane) renderConfigMode() string {
 	// Create title
 	title := "Configuration Editor"
-	
+
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("15")).
 		Background(lipgloss.Color("62")).
 		Padding(0, 1).
 		Width(a.width - 3)
-	
+
 	titleBar := titleStyle.Render(title)
-	
+
 	// Instructions
 	instructions := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("15")).
 		Padding(0, 1).
 		Width(a.width - 4).
 		Render("[↑↓] Navigate | [Enter] Edit/Save | [←→] Move Cursor | [Esc] Save & Exit")
-	
+
 	// Calculate available height for config content
 	contentHeight := a.height - 4
 	if contentHeight < 3 {
 		contentHeight = 3
 	}
-	
+
 	// Build config fields display
 	var displayLines []string
-	
+
 	for i, field := range a.configFields {
 		var line string
-		
+
 		if i == a.selectedField {
 			if a.editingField {
 				// Show edit buffer with cursor at correct position
 				prefix := "> " + field + ": "
 				beforeCursor := a.editBuffer[:a.editCursorPos]
 				afterCursor := a.editBuffer[a.editCursorPos:]
-				
+
 				line = lipgloss.NewStyle().
 					Foreground(lipgloss.Color("15")).
 					Background(lipgloss.Color("62")).
@@ -1348,26 +1373,26 @@ func (a *AIChatPane) renderConfigMode() string {
 				Foreground(lipgloss.Color("252")).
 				Render("  " + field + ": " + a.configValues[i])
 		}
-		
+
 		displayLines = append(displayLines, line)
 	}
-	
+
 	// Add empty lines to fill content height
 	for len(displayLines) < contentHeight {
 		displayLines = append(displayLines, "")
 	}
-	
+
 	// Truncate if too many lines
 	if len(displayLines) > contentHeight {
 		displayLines = displayLines[:contentHeight]
 	}
-	
+
 	// Pad each line to content width
 	contentWidth := a.width - 6
 	if contentWidth < 10 {
 		contentWidth = 10
 	}
-	
+
 	for i, line := range displayLines {
 		lineWidth := lipgloss.Width(line)
 		paddingNeed := contentWidth - lineWidth
@@ -1376,9 +1401,9 @@ func (a *AIChatPane) renderConfigMode() string {
 		}
 		displayLines[i] = line + strings.Repeat(" ", paddingNeed)
 	}
-	
+
 	configContent := strings.Join(displayLines, "\n")
-	
+
 	// Create config display with border
 	configStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1387,10 +1412,51 @@ func (a *AIChatPane) renderConfigMode() string {
 		Width(a.width - 4).
 		Height(contentHeight).
 		Foreground(lipgloss.Color("15"))
-	
+
 	return lipgloss.JoinVertical(lipgloss.Left,
 		titleBar,
 		instructions,
 		configStyle.Render(configContent),
 	)
+}
+
+// wrapText wraps text to fit within the specified width.
+// Returns a slice of lines, each fitting within the width.
+func wrapText(text string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+
+	var lines []string
+	var currentLine string
+
+	for _, r := range text {
+		if r == '\n' {
+			lines = append(lines, currentLine)
+			currentLine = ""
+			continue
+		}
+
+		if lipgloss.Width(currentLine+string(r)) > width {
+			if currentLine != "" {
+				lines = append(lines, currentLine)
+				currentLine = string(r)
+			} else {
+				// Single character exceeds width, add it anyway
+				lines = append(lines, string(r))
+			}
+		} else {
+			currentLine += string(r)
+		}
+	}
+
+	if currentLine != "" {
+		lines = append(lines, currentLine)
+	}
+
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+
+	return lines
 }
