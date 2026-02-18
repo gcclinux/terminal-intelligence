@@ -23,7 +23,8 @@ linux:
 	@echo "Building $(BINARY_NAME) for Linux..."
 	@mkdir -p $(BUILD_DIR)
 	GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 .
-	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64"
+	GOOS=linux GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-aarch64 .
+	@echo "Build complete: $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 and $(BUILD_DIR)/$(BINARY_NAME)-linux-aarch64"
 
 # Build for Windows
 windows:
