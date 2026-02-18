@@ -37,9 +37,9 @@ func FromJSON(data []byte) (*JSONConfig, error) {
 	return &cfg, nil
 }
 
-// ToJSON serializes a JSONConfig to a JSON byte slice.
+// ToJSON serializes a JSONConfig to a JSON byte slice with pretty formatting.
 func ToJSON(cfg *JSONConfig) ([]byte, error) {
-	return json.Marshal(cfg)
+	return json.MarshalIndent(cfg, "", "  ")
 }
 
 // Validate checks that the JSONConfig has valid field values.

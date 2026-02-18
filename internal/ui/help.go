@@ -12,7 +12,7 @@ func (a *App) renderHelpDialog() string {
 		Foreground(lipgloss.Color("15")).
 		Background(lipgloss.Color("62")).
 		Padding(0, 1).
-		Width(52).
+		Width(60).
 		Align(lipgloss.Center)
 
 	titleBar := titleStyle.Render("⌨  Keyboard Shortcuts")
@@ -32,7 +32,7 @@ func (a *App) renderHelpDialog() string {
 	var helpText string
 
 	// File section
-	helpText += sectionStyle.Render("── File ──────────────────────────────") + "\n"
+	helpText += sectionStyle.Render("── File ──────────────────────────────────────") + "\n"
 	helpText += keyStyle.Render("  Ctrl+O") + descStyle.Render("    Open file") + "\n"
 	helpText += keyStyle.Render("  Ctrl+N") + descStyle.Render("    New file") + "\n"
 	helpText += keyStyle.Render("  Ctrl+S") + descStyle.Render("    Save file") + "\n"
@@ -41,7 +41,7 @@ func (a *App) renderHelpDialog() string {
 	helpText += "\n"
 
 	// AI section
-	helpText += sectionStyle.Render("── AI ────────────────────────────────") + "\n"
+	helpText += sectionStyle.Render("── AI ────────────────────────────────────────") + "\n"
 	helpText += keyStyle.Render("  Ctrl+Y") + descStyle.Render("    List code blocks") + "\n"
 	helpText += keyStyle.Render("  Ctrl+P") + descStyle.Render("    Insert selected code into editor") + "\n"
 	helpText += keyStyle.Render("  Ctrl+A") + descStyle.Render("    Insert full AI response into file") + "\n"
@@ -49,7 +49,7 @@ func (a *App) renderHelpDialog() string {
 	helpText += "\n"
 
 	// Navigation section
-	helpText += sectionStyle.Render("── Navigation ────────────────────────") + "\n"
+	helpText += sectionStyle.Render("── Navigation ────────────────────────────────") + "\n"
 	helpText += keyStyle.Render("  Tab") + descStyle.Render("       Cycle: Editor → AI Input → AI Response") + "\n"
 	helpText += keyStyle.Render("  ↑↓") + descStyle.Render("        Scroll line by line") + "\n"
 	helpText += keyStyle.Render("  PgUp/PgDn") + descStyle.Render(" Scroll page") + "\n"
@@ -57,11 +57,21 @@ func (a *App) renderHelpDialog() string {
 	helpText += keyStyle.Render("  Esc") + descStyle.Render("       Back") + "\n"
 	helpText += "\n"
 
+	// Agent Commands section
+	helpText += sectionStyle.Render("── Agent Commands ────────────────────────────") + "\n"
+	helpText += keyStyle.Render("  /fix") + descStyle.Render("       Force agentic mode (AI modifies code)") + "\n"
+	helpText += keyStyle.Render("  /ask") + descStyle.Render("       Force conversational mode (no changes)") + "\n"
+	helpText += keyStyle.Render("  /preview") + descStyle.Render("   Preview changes before applying") + "\n"
+	helpText += keyStyle.Render("  /model") + descStyle.Render("     Show current agent and model info") + "\n"
+	helpText += keyStyle.Render("  /config") + descStyle.Render("    Edit configuration settings") + "\n"
+	helpText += keyStyle.Render("  /help") + descStyle.Render("      Show this help message") + "\n"
+	helpText += "\n"
+
 	// Footer
 	footerStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("240")).
 		Align(lipgloss.Center).
-		Width(52)
+		Width(60)
 
 	footer := footerStyle.Render("Press Esc or Ctrl+H to close")
 
@@ -70,7 +80,7 @@ func (a *App) renderHelpDialog() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(1, 2).
-		Width(56)
+		Width(64)
 
 	dialog := dialogStyle.Render(
 		lipgloss.JoinVertical(lipgloss.Left, titleBar, "", helpText, footer),

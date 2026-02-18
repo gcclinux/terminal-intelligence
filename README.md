@@ -51,6 +51,7 @@ Your file is marked as modified but not automatically saved, giving you full con
 - `/ask <your question>` - Force conversational mode (AI won't modify code)
 - `/preview <your request>` - Preview changes before applying them
 - `/model` - Display current agent and model information
+- `/config` - Edit configuration settings interactively
 - `/help` - Display keyboard shortcuts and agent commands
 
 ### Usage Examples
@@ -95,6 +96,20 @@ You: /model
 
 The AI displays the current agent (ollama or gemini) and model being used (e.g., llama2, gemini-2.5-flash-lite). If using Gemini, it also displays the API key from the configuration.
 
+#### Using /config Command
+
+```
+You: /config
+```
+
+Opens an interactive configuration editor where you can modify settings without leaving the application:
+- Navigate fields with Up/Down or K/J keys
+- Press Enter to edit a field value
+- Press Enter again to save the edited value
+- Press Esc to save all changes and exit config mode
+
+The configuration is saved to `~/.ti/config.json` and applied immediately without restarting the application.
+
 #### Using /help Command
 
 ```
@@ -103,8 +118,10 @@ You: /help
 
 The AI displays a comprehensive help message including:
 - All keyboard shortcuts (same as Ctrl+H)
-- Agent commands (/fix, /ask, /preview, /model, /help)
+- Agent commands (/fix, /ask, /preview, /model, /config, /help)
 - Fix keywords (fix, change, update, modify, correct) with descriptions
+
+You can also press Ctrl+H at any time to see the help dialog with all keyboard shortcuts and agent commands organized by category.
 
 #### Multiple Changes
 

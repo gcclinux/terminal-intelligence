@@ -54,6 +54,13 @@ type AIChatPane struct {
 	lastKeyPressed   string              // Last key pressed (for debugging)
 	activeArea       int                 // 0: Input, 1: Response
 	viewModeScroll   int                 // Scroll offset for code block view mode
+	configMode       bool                // Whether in config editor mode
+	configFields     []string            // Config field names
+	configValues     []string            // Config field values
+	selectedField    int                 // Currently selected config field
+	editingField     bool                // Whether currently editing a field
+	editBuffer       string              // Buffer for editing field value
+	editCursorPos    int                 // Cursor position within edit buffer
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -77,6 +84,13 @@ type SendAIMessageMsg struct {
 // Used by AgenticCodeFixer to show fix results.
 type AINotificationMsg struct {
 	Content string // Notification content
+}
+
+// SaveConfigMsg is sent when user wants to save config changes.
+// Triggered by Esc in config mode.
+type SaveConfigMsg struct {
+	Fields []string // Config field names
+	Values []string // Config field values
 }
 
 // NewAIChatPane creates a new AI chat pane.
@@ -331,6 +345,13 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 // handleKeyPress handles keyboard input for the AI pane.
 // Supports different key bindings based on current mode:
 //
+// Config mode (editing configuration):
+//   - Up/Down/K/J: Navigate fields
+//   - Enter: Edit selected field or save changes
+//   - Esc/Q: Exit config mode or cancel editing
+//   - Backspace: Delete character when editing
+//   - Printable characters: Add to edit buffer when editing
+//
 // View mode (viewing code block):
 //   - Esc/Q: Exit view mode
 //   - Ctrl+P: Insert code into editor
@@ -362,6 +383,90 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 // Returns:
 //   - tea.Cmd: Command to execute (can be nil or custom message)
 func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
+	// Handle config mode
+	if a.configMode {
+		if a.editingField {
+			// Editing a field value
+			switch msg.String() {
+			case "enter":
+				// Save the edited value
+				a.configValues[a.selectedField] = a.editBuffer
+				a.editingField = false
+				a.editBuffer = ""
+				a.editCursorPos = 0
+			case "esc":
+				// Cancel editing
+				a.editingField = false
+				a.editBuffer = ""
+				a.editCursorPos = 0
+			case "left":
+				// Move cursor left
+				if a.editCursorPos > 0 {
+					a.editCursorPos--
+				}
+			case "right":
+				// Move cursor right
+				if a.editCursorPos < len(a.editBuffer) {
+					a.editCursorPos++
+				}
+			case "home":
+				// Move cursor to start
+				a.editCursorPos = 0
+			case "end":
+				// Move cursor to end
+				a.editCursorPos = len(a.editBuffer)
+			case "backspace":
+				// Delete character before cursor
+				if a.editCursorPos > 0 {
+					a.editBuffer = a.editBuffer[:a.editCursorPos-1] + a.editBuffer[a.editCursorPos:]
+					a.editCursorPos--
+				}
+			case "delete":
+				// Delete character at cursor
+				if a.editCursorPos < len(a.editBuffer) {
+					a.editBuffer = a.editBuffer[:a.editCursorPos] + a.editBuffer[a.editCursorPos+1:]
+				}
+			default:
+				// Insert character at cursor position
+				if len(msg.String()) == 1 {
+					r := []rune(msg.String())[0]
+					if r >= 32 {
+						// Insert character at cursor position
+						a.editBuffer = a.editBuffer[:a.editCursorPos] + msg.String() + a.editBuffer[a.editCursorPos:]
+						a.editCursorPos++
+					}
+				}
+			}
+		} else {
+			// Navigating config fields
+			switch msg.String() {
+			case "up", "k":
+				if a.selectedField > 0 {
+					a.selectedField--
+				}
+			case "down", "j":
+				if a.selectedField < len(a.configFields)-1 {
+					a.selectedField++
+				}
+			case "enter":
+				// Start editing the selected field
+				a.editingField = true
+				a.editBuffer = a.configValues[a.selectedField]
+				a.editCursorPos = len(a.editBuffer) // Start cursor at end
+			case "esc", "q":
+				// Exit config mode and save changes
+				a.configMode = false
+				// Return a custom message to trigger config save
+				return func() tea.Msg {
+					return SaveConfigMsg{
+						Fields: a.configFields,
+						Values: a.configValues,
+					}
+				}
+			}
+		}
+		return nil
+	}
 	// Handle view mode (viewing full code block)
 	if a.viewMode {
 		keyStr := msg.String()
@@ -668,6 +773,7 @@ func (a *AIChatPane) renderMessage(msg types.ChatMessage) []string {
 
 // View renders the AI pane with split layout (input top, responses bottom).
 // Displays different views based on current mode:
+//   - Config mode: Configuration editor with field navigation
 //   - View mode: Full code block viewer with scrolling
 //   - Copy mode: Code block selection dialog
 //   - Normal mode: Input area + response area with conversation history
@@ -683,6 +789,10 @@ func (a *AIChatPane) renderMessage(msg types.ChatMessage) []string {
 // Returns:
 //   - string: Rendered AI pane
 func (a *AIChatPane) View() string {
+	// Show config mode if active
+	if a.configMode {
+		return a.renderConfigMode()
+	}
 	// Show view mode if active
 	if a.viewMode {
 		return a.renderViewMode()
@@ -844,7 +954,7 @@ func (a *AIChatPane) View() string {
 			Background(lipgloss.Color("62"))
 	} else {
 		titleStyle = titleStyle.
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("15")).
 			Background(lipgloss.Color("235"))
 	}
 
@@ -1156,4 +1266,131 @@ func (a *AIChatPane) GetLastAssistantResponse() string {
 		}
 	}
 	return ""
+}
+
+// EnterConfigMode enters the configuration editor mode.
+// Loads current config values and displays them for editing.
+//
+// Parameters:
+//   - fields: Config field names
+//   - values: Config field values
+func (a *AIChatPane) EnterConfigMode(fields []string, values []string) {
+	a.configMode = true
+	a.configFields = fields
+	a.configValues = values
+	a.selectedField = 0
+	a.editingField = false
+	a.editBuffer = ""
+	a.editCursorPos = 0
+}
+
+// renderConfigMode renders the configuration editor.
+// Displays config fields with their values and allows editing.
+// Shows instructions for navigation and saving.
+//
+// Returns:
+//   - string: Rendered config editor
+func (a *AIChatPane) renderConfigMode() string {
+	// Create title
+	title := "Configuration Editor"
+	
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("15")).
+		Background(lipgloss.Color("62")).
+		Padding(0, 1).
+		Width(a.width - 3)
+	
+	titleBar := titleStyle.Render(title)
+	
+	// Instructions
+	instructions := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("15")).
+		Padding(0, 1).
+		Width(a.width - 4).
+		Render("[↑↓] Navigate | [Enter] Edit/Save | [←→] Move Cursor | [Esc] Save & Exit")
+	
+	// Calculate available height for config content
+	contentHeight := a.height - 4
+	if contentHeight < 3 {
+		contentHeight = 3
+	}
+	
+	// Build config fields display
+	var displayLines []string
+	
+	for i, field := range a.configFields {
+		var line string
+		
+		if i == a.selectedField {
+			if a.editingField {
+				// Show edit buffer with cursor at correct position
+				prefix := "> " + field + ": "
+				beforeCursor := a.editBuffer[:a.editCursorPos]
+				afterCursor := a.editBuffer[a.editCursorPos:]
+				
+				line = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("15")).
+					Background(lipgloss.Color("62")).
+					Bold(true).
+					Render(prefix + beforeCursor + "█" + afterCursor)
+			} else {
+				// Highlight selected field
+				line = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("15")).
+					Background(lipgloss.Color("62")).
+					Bold(true).
+					Render("> " + field + ": " + a.configValues[i])
+			}
+		} else {
+			// Normal field display
+			line = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("252")).
+				Render("  " + field + ": " + a.configValues[i])
+		}
+		
+		displayLines = append(displayLines, line)
+	}
+	
+	// Add empty lines to fill content height
+	for len(displayLines) < contentHeight {
+		displayLines = append(displayLines, "")
+	}
+	
+	// Truncate if too many lines
+	if len(displayLines) > contentHeight {
+		displayLines = displayLines[:contentHeight]
+	}
+	
+	// Pad each line to content width
+	contentWidth := a.width - 6
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
+	
+	for i, line := range displayLines {
+		lineWidth := lipgloss.Width(line)
+		paddingNeed := contentWidth - lineWidth
+		if paddingNeed < 0 {
+			paddingNeed = 0
+		}
+		displayLines[i] = line + strings.Repeat(" ", paddingNeed)
+	}
+	
+	configContent := strings.Join(displayLines, "\n")
+	
+	// Create config display with border
+	configStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("62")).
+		Padding(0, 1).
+		Width(a.width - 4).
+		Height(contentHeight).
+		Foreground(lipgloss.Color("15"))
+	
+	return lipgloss.JoinVertical(lipgloss.Left,
+		titleBar,
+		instructions,
+		configStyle.Render(configContent),
+	)
 }

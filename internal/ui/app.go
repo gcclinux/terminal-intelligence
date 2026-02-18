@@ -15,12 +15,14 @@ package ui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/agentic"
 	"github.com/user/terminal-intelligence/internal/ai"
+	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
 	"github.com/user/terminal-intelligence/internal/gemini"
 	"github.com/user/terminal-intelligence/internal/ollama"
@@ -162,6 +164,73 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case SaveConfigMsg:
+		// Handle config save
+		configPath, err := config.ConfigFilePath()
+		if err != nil {
+			a.statusMessage = "Error: Unable to locate config file: " + err.Error()
+			return a, nil
+		}
+		
+		// Build JSONConfig from fields and values
+		jcfg := &config.JSONConfig{}
+		for i, field := range msg.Fields {
+			switch field {
+			case "agent":
+				jcfg.Agent = msg.Values[i]
+			case "model":
+				jcfg.Model = msg.Values[i]
+			case "gmodel":
+				jcfg.GModel = msg.Values[i]
+			case "ollama_url":
+				jcfg.OllamaURL = msg.Values[i]
+			case "gemini_api":
+				jcfg.GeminiAPI = msg.Values[i]
+			case "workspace":
+				jcfg.Workspace = msg.Values[i]
+			}
+		}
+		
+		// Validate config
+		if err := config.Validate(jcfg); err != nil {
+			a.statusMessage = "Config validation error: " + err.Error()
+			return a, nil
+		}
+		
+		// Save to file
+		data, err := config.ToJSON(jcfg)
+		if err != nil {
+			a.statusMessage = "Error serializing config: " + err.Error()
+			return a, nil
+		}
+		
+		err = os.WriteFile(configPath, data, 0644)
+		if err != nil {
+			a.statusMessage = "Error saving config: " + err.Error()
+			return a, nil
+		}
+		
+		// Apply to current app config
+		config.ApplyToAppConfig(jcfg, a.config)
+		
+		// Reinitialize AI client if provider or settings changed
+		if a.config.Provider == "gemini" {
+			a.aiClient = gemini.NewGeminiClient(a.config.GeminiAPIKey)
+		} else {
+			a.aiClient = ollama.NewOllamaClient(a.config.OllamaURL)
+		}
+		
+		// Update AI pane with new client and model
+		a.aiPane.aiClient = a.aiClient
+		a.aiPane.model = a.config.DefaultModel
+		a.aiPane.provider = a.config.Provider
+		
+		// Update agentic fixer
+		a.agenticFixer = agentic.NewAgenticCodeFixer(a.aiClient, a.config.DefaultModel)
+		
+		a.statusMessage = "Configuration saved successfully to " + configPath
+		return a, nil
+		
 	case InsertCodeMsg:
 		// Handle code insertion from AI pane
 		selectedCode := a.aiPane.GetSelectedCodeBlock()
@@ -255,11 +324,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open selected file
 				if len(a.fileList) > 0 && a.filePickerIndex < len(a.fileList) {
 					selectedFile := a.fileList[a.filePickerIndex]
+					
+					// Debug: Log the file being opened
+					a.statusMessage = "Opening: " + selectedFile
+					
 					err := a.editorPane.LoadFile(selectedFile)
 					if err != nil {
-						a.statusMessage = "Error opening: " + err.Error()
+						a.statusMessage = "Error opening file: " + err.Error()
 					} else {
-						a.statusMessage = "Opened: " + selectedFile
+						a.statusMessage = "Successfully opened: " + selectedFile
+						// Switch to editor pane after opening file
+						a.activePane = types.EditorPaneType
+						a.editorPane.focused = true
+						a.aiPane.focused = false
 					}
 				}
 				a.showFilePicker = false
@@ -384,6 +461,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.fileList = files
 			a.filePickerIndex = 0
 			a.showFilePicker = true
+			a.statusMessage = fmt.Sprintf("Found %d files", len(files))
 			return a, nil
 
 		case "ctrl+n":
@@ -644,9 +722,21 @@ func (a *App) View() string {
 			Width(60).
 			Align(lipgloss.Left)
 
+		// Styles for file list
+		selectedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62")).
+			Bold(true)
+		
+		normalStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
 		// Build file list display
 		var fileListDisplay string
-		fileListDisplay = "Select a file to open:\n\n"
+		fileListDisplay = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Render("Select a file to open:") + "\n\n"
 
 		maxDisplay := 15 // Maximum files to display at once
 		startIdx := a.filePickerIndex - maxDisplay/2
@@ -664,13 +754,15 @@ func (a *App) View() string {
 
 		for i := startIdx; i < endIdx; i++ {
 			if i == a.filePickerIndex {
-				fileListDisplay += "> " + a.fileList[i] + "\n"
+				fileListDisplay += selectedStyle.Render("> " + a.fileList[i]) + "\n"
 			} else {
-				fileListDisplay += "  " + a.fileList[i] + "\n"
+				fileListDisplay += normalStyle.Render("  " + a.fileList[i]) + "\n"
 			}
 		}
 
-		fileListDisplay += "\n[↑↓] Navigate | [Enter] Open | [Esc] Cancel"
+		fileListDisplay += "\n" + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("[↑↓] Navigate | [Enter] Open | [Esc] Cancel")
 
 		dialog := pickerStyle.Render(fileListDisplay)
 
@@ -720,7 +812,7 @@ func (a *App) View() string {
 
 	// Create status bar
 	statusStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(lipgloss.Color("15")).
 		Background(lipgloss.Color("235")).
 		Padding(0, 1)
 
@@ -807,6 +899,47 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 	// Check for special commands
 	trimmedMsg := strings.TrimSpace(strings.ToLower(message))
 	
+	// Handle /config command
+	if trimmedMsg == "/config" {
+		// Load current config and enter config mode
+		configPath, err := config.ConfigFilePath()
+		if err != nil {
+			return func() tea.Msg {
+				return AIResponseMsg{
+					Content: "Error: Unable to locate config file: " + err.Error(),
+					Done:    true,
+				}
+			}
+		}
+		
+		// Read current config
+		jcfg, err := config.LoadFromFile(configPath)
+		if err != nil {
+			return func() tea.Msg {
+				return AIResponseMsg{
+					Content: "Error: Unable to load config file: " + err.Error(),
+					Done:    true,
+				}
+			}
+		}
+		
+		// Prepare config fields and values
+		fields := []string{"agent", "model", "gmodel", "ollama_url", "gemini_api", "workspace"}
+		values := []string{
+			jcfg.Agent,
+			jcfg.Model,
+			jcfg.GModel,
+			jcfg.OllamaURL,
+			jcfg.GeminiAPI,
+			jcfg.Workspace,
+		}
+		
+		// Enter config mode
+		a.aiPane.EnterConfigMode(fields, values)
+		
+		return nil
+	}
+	
 	// Handle /model command
 	if trimmedMsg == "/model" {
 		// Return current agent and model information
@@ -855,6 +988,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  /ask      Force conversational mode (no code changes)\n"
 		helpText += "  /preview  Preview changes before applying\n"
 		helpText += "  /model    Show current agent and model info\n"
+		helpText += "  /config   Edit configuration settings\n"
 		helpText += "  /help     Show this help message\n\n"
 		helpText += "Fix Keywords\n"
 		helpText += "------------\n"
