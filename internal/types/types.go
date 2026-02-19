@@ -17,10 +17,12 @@ const (
 
 // AppConfig holds application configuration
 type AppConfig struct {
-	Provider     string `yaml:"provider"`      // "ollama" or "gemini"
+	Provider     string `yaml:"provider"` // "ollama" or "gemini"
 	OllamaURL    string `yaml:"ollama_url"`
 	GeminiAPIKey string `yaml:"gemini_api_key"`
 	DefaultModel string `yaml:"default_model"`
+	OllamaModel  string `yaml:"ollama_model"`
+	GeminiModel  string `yaml:"gemini_model"`
 	EditorTheme  string `yaml:"editor_theme"`
 	WorkspaceDir string `yaml:"workspace_dir"`
 	AutoSave     bool   `yaml:"auto_save"`
@@ -35,6 +37,8 @@ func DefaultConfig() *AppConfig {
 		OllamaURL:    "http://localhost:11434",
 		GeminiAPIKey: "",
 		DefaultModel: "llama2",
+		OllamaModel:  "llama2",
+		GeminiModel:  "gemini-2.0-flash-exp",
 		EditorTheme:  "monokai",
 		WorkspaceDir: filepath.Join(homeDir, "ti-workspace"),
 		AutoSave:     false,

@@ -59,17 +59,27 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 	if jcfg.Agent != "" {
 		appCfg.Provider = jcfg.Agent
 	}
-	// Use gmodel for gemini, model for ollama
-	switch jcfg.Agent {
-	case "gemini":
-		if jcfg.GModel != "" {
-			appCfg.DefaultModel = jcfg.GModel
+
+	// Update stored models if present in config
+	if jcfg.GModel != "" {
+		appCfg.GeminiModel = jcfg.GModel
+	}
+	if jcfg.Model != "" {
+		appCfg.OllamaModel = jcfg.Model
+	}
+
+	// Set active model based on provider
+	if appCfg.Provider == "gemini" {
+		if appCfg.GeminiModel != "" {
+			appCfg.DefaultModel = appCfg.GeminiModel
 		}
-	default:
-		if jcfg.Model != "" {
-			appCfg.DefaultModel = jcfg.Model
+	} else {
+		// Default to ollama
+		if appCfg.OllamaModel != "" {
+			appCfg.DefaultModel = appCfg.OllamaModel
 		}
 	}
+
 	if jcfg.OllamaURL != "" {
 		appCfg.OllamaURL = jcfg.OllamaURL
 	}
@@ -88,11 +98,19 @@ func AppConfigToJSONConfig(appCfg *types.AppConfig) *JSONConfig {
 		OllamaURL: appCfg.OllamaURL,
 		GeminiAPI: appCfg.GeminiAPIKey,
 		Workspace: appCfg.WorkspaceDir,
+		Model:     appCfg.OllamaModel,
+		GModel:    appCfg.GeminiModel,
 	}
+
+	// Ensure active model is synced to the correct field if stored model is empty
 	if appCfg.Provider == "gemini" {
-		jcfg.GModel = appCfg.DefaultModel
+		if jcfg.GModel == "" {
+			jcfg.GModel = appCfg.DefaultModel
+		}
 	} else {
-		jcfg.Model = appCfg.DefaultModel
+		if jcfg.Model == "" {
+			jcfg.Model = appCfg.DefaultModel
+		}
 	}
 	return jcfg
 }
