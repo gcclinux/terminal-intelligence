@@ -16,6 +16,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -48,38 +49,40 @@ import (
 //
 // The App implements the Bubble Tea Model interface (Init, Update, View).
 type App struct {
-	config               *types.AppConfig           // Application configuration
-	editorPane           *EditorPane                // Left pane: code editor
-	aiPane               *AIChatPane                // Right pane: AI chat
-	fileManager          *filemanager.FileManager   // File system operations
-	aiClient             ai.AIClient                // AI service client (Ollama or Gemini)
-	agenticFixer         *agentic.AgenticCodeFixer  // Autonomous code fixing orchestrator
-	activePane           types.PaneType             // Currently focused pane
-	width                int                        // Terminal width
-	height               int                        // Terminal height
-	ready                bool                       // Whether initial sizing is complete
-	showExitConfirmation bool                       // Whether exit confirmation dialog is showing
-	showFilePrompt       bool                       // Whether file creation prompt is showing
-	showFilePicker       bool                       // Whether file picker dialog is showing
-	showHelp             bool                       // Whether help dialog is showing
-	filePromptBuffer     string                     // Buffer for file name input
-	fileList             []string                   // List of files for picker
-	filePickerIndex      int                        // Selected index in file picker
-	forceQuit            bool                       // Whether to quit without save confirmation
-	statusMessage        string                     // Status bar message
-	pendingCodeInsert    string                     // Code waiting to be inserted after file creation
-	buildNumber          string                     // Build number from git commits
+	config               *types.AppConfig          // Application configuration
+	editorPane           *EditorPane               // Left pane: code editor
+	aiPane               *AIChatPane               // Right pane: AI chat
+	fileManager          *filemanager.FileManager  // File system operations
+	aiClient             ai.AIClient               // AI service client (Ollama or Gemini)
+	agenticFixer         *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
+	activePane           types.PaneType            // Currently focused pane
+	width                int                       // Terminal width
+	height               int                       // Terminal height
+	ready                bool                      // Whether initial sizing is complete
+	showExitConfirmation bool                      // Whether exit confirmation dialog is showing
+	showFilePrompt       bool                      // Whether file creation prompt is showing
+	showFilePicker       bool                      // Whether file picker dialog is showing
+	showBackupPicker     bool                      // Whether backup picker dialog is showing
+	showHelp             bool                      // Whether help dialog is showing
+	filePromptBuffer     string                    // Buffer for file name input
+	fileList             []string                  // List of files for picker
+	backupList           []string                  // List of backups for picker
+	filePickerIndex      int                       // Selected index in file picker
+	forceQuit            bool                      // Whether to quit without save confirmation
+	statusMessage        string                    // Status bar message
+	pendingCodeInsert    string                    // Code waiting to be inserted after file creation
+	buildNumber          string                    // Build number from git commits
 }
 
 // New creates a new application instance with the provided configuration.
 // If config is nil, uses default configuration.
 //
 // Initialization process:
-//   1. Creates FileManager for file system operations
-//   2. Creates AI client based on provider (Ollama or Gemini)
-//   3. Initializes AgenticCodeFixer with AI client and model
-//   4. Creates EditorPane and AIChatPane components
-//   5. Sets initial state (editor pane active, no dialogs showing)
+//  1. Creates FileManager for file system operations
+//  2. Creates AI client based on provider (Ollama or Gemini)
+//  3. Initializes AgenticCodeFixer with AI client and model
+//  4. Creates EditorPane and AIChatPane components
+//  5. Sets initial state (editor pane active, no dialogs showing)
 //
 // The returned App is ready to be run with Bubble Tea's tea.NewProgram().
 //
@@ -88,15 +91,16 @@ type App struct {
 //
 // Returns:
 //   - *App: Initialized application instance
+//
 // New creates a new application instance with the provided configuration.
 // If config is nil, uses default configuration.
 //
 // Initialization process:
-//   1. Creates FileManager for file system operations
-//   2. Creates AI client based on provider (Ollama or Gemini)
-//   3. Initializes AgenticCodeFixer with AI client and model
-//   4. Creates EditorPane and AIChatPane components
-//   5. Sets initial state (editor pane active, no dialogs showing)
+//  1. Creates FileManager for file system operations
+//  2. Creates AI client based on provider (Ollama or Gemini)
+//  3. Initializes AgenticCodeFixer with AI client and model
+//  4. Creates EditorPane and AIChatPane components
+//  5. Sets initial state (editor pane active, no dialogs showing)
 //
 // The returned App is ready to be run with Bubble Tea's tea.NewProgram().
 //
@@ -151,10 +155,10 @@ func (a *App) Init() tea.Cmd {
 // This is the main message handler for the Bubble Tea Model interface.
 //
 // Message handling priority:
-//   1. Custom messages (InsertCodeMsg, SendAIMessageMsg, AINotificationMsg)
-//   2. Window sizing (tea.WindowSizeMsg)
-//   3. Keyboard input (tea.KeyMsg)
-//   4. Routing to active pane
+//  1. Custom messages (InsertCodeMsg, SendAIMessageMsg, AINotificationMsg)
+//  2. Window sizing (tea.WindowSizeMsg)
+//  3. Keyboard input (tea.KeyMsg)
+//  4. Routing to active pane
 //
 // Dialog handling:
 //   - Help dialog: Ctrl+H to toggle, Esc/Q to close
@@ -191,7 +195,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusMessage = "Error: Unable to locate config file: " + err.Error()
 			return a, nil
 		}
-		
+
 		// Build JSONConfig from fields and values
 		jcfg := &config.JSONConfig{}
 		for i, field := range msg.Fields {
@@ -210,47 +214,47 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				jcfg.Workspace = msg.Values[i]
 			}
 		}
-		
+
 		// Validate config
 		if err := config.Validate(jcfg); err != nil {
 			a.statusMessage = "Config validation error: " + err.Error()
 			return a, nil
 		}
-		
+
 		// Save to file
 		data, err := config.ToJSON(jcfg)
 		if err != nil {
 			a.statusMessage = "Error serializing config: " + err.Error()
 			return a, nil
 		}
-		
+
 		err = os.WriteFile(configPath, data, 0644)
 		if err != nil {
 			a.statusMessage = "Error saving config: " + err.Error()
 			return a, nil
 		}
-		
+
 		// Apply to current app config
 		config.ApplyToAppConfig(jcfg, a.config)
-		
+
 		// Reinitialize AI client if provider or settings changed
 		if a.config.Provider == "gemini" {
 			a.aiClient = gemini.NewGeminiClient(a.config.GeminiAPIKey)
 		} else {
 			a.aiClient = ollama.NewOllamaClient(a.config.OllamaURL)
 		}
-		
+
 		// Update AI pane with new client and model
 		a.aiPane.aiClient = a.aiClient
 		a.aiPane.model = a.config.DefaultModel
 		a.aiPane.provider = a.config.Provider
-		
+
 		// Update agentic fixer
 		a.agenticFixer = agentic.NewAgenticCodeFixer(a.aiClient, a.config.DefaultModel)
-		
+
 		a.statusMessage = "Configuration saved successfully to " + configPath
 		return a, nil
-		
+
 	case InsertCodeMsg:
 		// Handle code insertion from AI pane
 		selectedCode := a.aiPane.GetSelectedCodeBlock()
@@ -287,6 +291,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			a.statusMessage = "No code block selected"
+		}
+		return a, nil
+
+	case AgenticFixResultMsg:
+		a.aiPane.streaming = false
+		result := msg.Result
+
+		// Handle fix results
+		if result.IsConversational {
+			// Should not happen if detected correctly, but handle gracefully
+			return a, a.aiPane.SendMessage(result.ChangesSummary, "")
+			// Wait, ChangesSummary might be empty/wrong if conversational.
+			// Actually ProcessMessage returns conversational result with empty content?
+			// Let's just log or ignore if it happens unexpectedly for now, or display error.
+		}
+
+		if result.Success {
+			// In preview mode, don't apply the fix to the editor
+			// Just show the changes summary
+			if !result.PreviewMode {
+				// Apply the fix to the editor
+				a.editorPane.SetContent(result.ModifiedContent)
+			}
+
+			// Show notification in chat
+			a.aiPane.DisplayNotification(result.ChangesSummary)
+		} else {
+			// Handle fix failure
+			a.aiPane.DisplayNotification(result.ErrorMessage)
 		}
 		return a, nil
 
@@ -344,10 +377,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Open selected file
 				if len(a.fileList) > 0 && a.filePickerIndex < len(a.fileList) {
 					selectedFile := a.fileList[a.filePickerIndex]
-					
+
 					// Debug: Log the file being opened
 					a.statusMessage = "Opening: " + selectedFile
-					
+
 					err := a.editorPane.LoadFile(selectedFile)
 					if err != nil {
 						a.statusMessage = "Error opening file: " + err.Error()
@@ -367,6 +400,52 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Cancel file picker
 				a.showFilePicker = false
 				a.fileList = nil
+				a.filePickerIndex = 0
+				return a, nil
+			}
+			return a, nil
+		}
+
+		// Handle backup picker dialog
+		if a.showBackupPicker {
+			switch msg.String() {
+			case "up", "k":
+				if a.filePickerIndex > 0 {
+					a.filePickerIndex--
+				}
+				return a, nil
+			case "down", "j":
+				if a.filePickerIndex < len(a.backupList)-1 {
+					a.filePickerIndex++
+				}
+				return a, nil
+			case "enter":
+				// Open selected backup
+				if len(a.backupList) > 0 && a.filePickerIndex < len(a.backupList) {
+					// Restore backup content to editor (keep original file path)
+					selectedBackup := a.backupList[a.filePickerIndex]
+					backupPath := filepath.Join(a.config.WorkspaceDir, ".ti", selectedBackup)
+
+					content, err := os.ReadFile(backupPath)
+					if err != nil {
+						a.statusMessage = "Error reading backup: " + err.Error()
+					} else {
+						a.editorPane.SetContent(string(content))
+						a.statusMessage = "Restored backup: " + selectedBackup + " (unsaved)"
+						// Switch to editor pane
+						a.activePane = types.EditorPaneType
+						a.editorPane.focused = true
+						a.aiPane.focused = false
+					}
+				}
+				a.showBackupPicker = false
+				a.backupList = nil
+				a.filePickerIndex = 0
+				return a, nil
+			case "esc":
+				// Cancel backup picker
+				a.showBackupPicker = false
+				a.backupList = nil
 				a.filePickerIndex = 0
 				return a, nil
 			}
@@ -466,6 +545,35 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear AI history on normal exit
 			a.aiPane.ClearHistory()
 			return a, tea.Quit
+
+		case "ctrl+b":
+			// Open backup picker
+			if a.editorPane.currentFile == nil {
+				a.statusMessage = "No file open to list backups for"
+				return a, nil
+			}
+
+			backups, err := a.fileManager.ListBackups(a.editorPane.currentFile.Filepath)
+			if err != nil {
+				a.statusMessage = "Error listing backups: " + err.Error()
+				return a, nil
+			}
+			if len(backups) == 0 {
+				a.statusMessage = "No backups found for this file"
+				return a, nil
+			}
+
+			// Sort backups: newest first (reverse order)
+			// Assuming timestamps YYYYMMDD-HHMMSS sort correctly lexicographically
+			for i, j := 0, len(backups)-1; i < j; i, j = i+1, j-1 {
+				backups[i], backups[j] = backups[j], backups[i]
+			}
+
+			a.backupList = backups
+			a.filePickerIndex = 0
+			a.showBackupPicker = true
+			a.statusMessage = fmt.Sprintf("Found %d backups (Newest first)", len(backups))
+			return a, nil
 
 		case "ctrl+o":
 			// Open file picker with list of existing files
@@ -622,14 +730,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // Returns:
 //   - string: Rendered header with styling and border
+//
 // renderHeader renders the application header with logo.
 // Displays binary "TI" on the left, "TERMINAL INTELLIGENCE (TI)" centered, and "Build: XXX" on the right.
 // The header is wrapped in a blue rounded border.
 //
 // Layout:
-//   Left: 01010100 01001001 (binary for "TI")
-//   Center: TERMINAL INTELLIGENCE (TI)
-//   Right: Build: XXX (git commit count)
+//
+//	Left: 01010100 01001001 (binary for "TI")
+//	Center: TERMINAL INTELLIGENCE (TI)
+//	Right: Build: XXX (git commit count)
 func (a *App) renderHeader() string {
 	// Binary code for "TI" on the left side
 	// T = 84 (0x54) = 01010100
@@ -736,12 +846,12 @@ func (a *App) renderEditorTitleBar() string {
 // This is part of the Bubble Tea Model interface.
 //
 // Rendering priority:
-//   1. Initialization message (if not ready)
-//   2. Help dialog (if showing)
-//   3. File picker dialog (if showing)
-//   4. File prompt dialog (if showing)
-//   5. Exit confirmation dialog (if showing)
-//   6. Main UI (header + editor title bar + split panes + status bar)
+//  1. Initialization message (if not ready)
+//  2. Help dialog (if showing)
+//  3. File picker dialog (if showing)
+//  4. File prompt dialog (if showing)
+//  5. Exit confirmation dialog (if showing)
+//  6. Main UI (header + editor title bar + split panes + status bar)
 //
 // Main UI layout:
 //   - Header: Application logo and title
@@ -761,6 +871,62 @@ func (a *App) View() string {
 		return a.renderHelpDialog()
 	}
 
+	// Show backup picker dialog if needed
+	if a.showBackupPicker {
+		pickerStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(80).
+			Align(lipgloss.Left)
+
+		selectedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62")).
+			Bold(true)
+
+		normalStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+		var listDisplay string
+		listDisplay = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Render("Select a backup to restore (creates new backup of current):") + "\n\n"
+
+		maxDisplay := 15
+		startIdx := a.filePickerIndex - maxDisplay/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := startIdx + maxDisplay
+		if endIdx > len(a.backupList) {
+			endIdx = len(a.backupList)
+			startIdx = endIdx - maxDisplay
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			displayName := a.backupList[i]
+			// Maybe shorten name for display if it has long path?
+			// But user needs to distinguish versions. Timestamp is first, so it's good.
+			if i == a.filePickerIndex {
+				listDisplay += selectedStyle.Render("> "+displayName) + "\n"
+			} else {
+				listDisplay += normalStyle.Render("  "+displayName) + "\n"
+			}
+		}
+
+		listDisplay += "\n" + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("[↑↓] Navigate | [Enter] Restore | [Esc] Cancel")
+
+		dialog := pickerStyle.Render(listDisplay)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
 	// Show file picker dialog if needed
 	if a.showFilePicker {
 		pickerStyle := lipgloss.NewStyle().
@@ -775,7 +941,7 @@ func (a *App) View() string {
 			Foreground(lipgloss.Color("15")).
 			Background(lipgloss.Color("62")).
 			Bold(true)
-		
+
 		normalStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
@@ -802,9 +968,9 @@ func (a *App) View() string {
 
 		for i := startIdx; i < endIdx; i++ {
 			if i == a.filePickerIndex {
-				fileListDisplay += selectedStyle.Render("> " + a.fileList[i]) + "\n"
+				fileListDisplay += selectedStyle.Render("> "+a.fileList[i]) + "\n"
 			} else {
-				fileListDisplay += normalStyle.Render("  " + a.fileList[i]) + "\n"
+				fileListDisplay += normalStyle.Render("  "+a.fileList[i]) + "\n"
 			}
 		}
 
@@ -940,13 +1106,14 @@ func (a *App) IsShowingExitConfirmation() bool {
 func (a *App) SetForceQuit(force bool) {
 	a.forceQuit = force
 }
+
 // handleAIMessage processes an AI message through the AgenticCodeFixer
 // It retrieves the current file context, processes the message, and applies fixes or returns conversational responses
 // Requirements: 1.1, 4.1, 9.1, 9.2, 8.5
 func (a *App) handleAIMessage(message string) tea.Cmd {
 	// Check for special commands
 	trimmedMsg := strings.TrimSpace(strings.ToLower(message))
-	
+
 	// Handle /config command
 	if trimmedMsg == "/config" {
 		// Load current config and enter config mode
@@ -959,7 +1126,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				}
 			}
 		}
-		
+
 		// Read current config
 		jcfg, err := config.LoadFromFile(configPath)
 		if err != nil {
@@ -970,7 +1137,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				}
 			}
 		}
-		
+
 		// Prepare config fields and values
 		fields := []string{"agent", "model", "gmodel", "ollama_url", "gemini_api", "workspace"}
 		values := []string{
@@ -981,23 +1148,23 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			jcfg.GeminiAPI,
 			jcfg.Workspace,
 		}
-		
+
 		// Enter config mode
 		a.aiPane.EnterConfigMode(fields, values)
-		
+
 		return nil
 	}
-	
+
 	// Handle /model command
 	if trimmedMsg == "/model" {
 		// Return current agent and model information
 		modelInfo := fmt.Sprintf("Agent: %s\nModel: %s", a.config.Provider, a.config.DefaultModel)
-		
+
 		// If agent is Gemini, also show the API key
 		if a.config.Provider == "gemini" && a.config.GeminiAPIKey != "" {
 			modelInfo += fmt.Sprintf("\nAPI Key: %s", a.config.GeminiAPIKey)
 		}
-		
+
 		return func() tea.Msg {
 			return AIResponseMsg{
 				Content: modelInfo,
@@ -1005,7 +1172,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			}
 		}
 	}
-	
+
 	// Handle /help command
 	if trimmedMsg == "/help" {
 		helpText := "Keyboard Shortcuts\n"
@@ -1016,6 +1183,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  Ctrl+N    New file\n"
 		helpText += "  Ctrl+S    Save file\n"
 		helpText += "  Ctrl+X    Close file\n"
+		helpText += "  Ctrl+B    Backup Picker (Restore previous versions)\n"
 		helpText += "  Ctrl+Q    Quit\n\n"
 		helpText += "AI\n"
 		helpText += "--\n"
@@ -1046,7 +1214,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  modify    Request code modification\n"
 		helpText += "  correct   Request code correction\n\n"
 		helpText += "Use these keywords in your message to trigger agentic mode."
-		
+
 		return func() tea.Msg {
 			return AIResponseMsg{
 				Content: helpText,
@@ -1054,70 +1222,58 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			}
 		}
 	}
-	
+
 	// Step 1: Get file context from EditorPane using GetCurrentFile()
 	fileContext := a.editorPane.GetCurrentFile()
-	
+
 	var fileContent, filePath, fileType string
-	
+
 	if fileContext != nil {
 		fileContent = fileContext.FileContent
 		filePath = fileContext.FilePath
 		fileType = fileContext.FileType
 	}
-	
-	// Step 2: Process message through AgenticCodeFixer
-	result, err := a.agenticFixer.ProcessMessage(
-		message,
-		fileContent,
-		filePath,
-		fileType,
-	)
-	
-	// Handle errors from ProcessMessage
-	if err != nil {
-		return func() tea.Msg {
-			return AIResponseMsg{
-				Content: "Error processing message: " + err.Error(),
-				Done:    true,
-			}
-		}
+
+	// Step 2: Determine if this is a fix request upfront
+	cleanMessage := message
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message)), "/preview") {
+		cleanMessage = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(message), "/preview"))
 	}
-	
-	// Step 3: Handle the FixResult appropriately
-	if result.IsConversational {
-		// This is a conversational message, not a fix request
-		// Use the existing SendMessage method to handle it normally
+
+	isFixDetection := a.agenticFixer.IsFixRequest(cleanMessage)
+
+	// Step 3: Handle conversational mode immediately
+	if !isFixDetection.IsFixRequest {
 		return a.aiPane.SendMessage(message, fileContent)
 	}
-	
-	// Step 4: Add fix request to conversation history
-	// This is a fix request, so add it to history with file context
+
+	// Step 4: Handle fix request
+	// Display the message immediately as a fix request
 	a.aiPane.AddFixRequest(message, filePath)
-	
-	// Step 5: Handle fix results
-	if result.Success {
-		// In preview mode, don't apply the fix to the editor
-		// Just show the changes summary
-		if !result.PreviewMode {
-			// Apply the fix to the editor
-			a.editorPane.SetContent(result.ModifiedContent)
-		}
-		
-		// Return notification message with changes summary
-		// The notification will be added to history by DisplayNotification
-		return func() tea.Msg {
-			return AINotificationMsg{
-				Content: result.ChangesSummary,
+
+	// Set AI pane to thinking state (streaming)
+	a.aiPane.streaming = true
+
+	// Step 5: Process the fix request asynchronously
+	return func() tea.Msg {
+		result, err := a.agenticFixer.ProcessMessage(
+			message,
+			fileContent,
+			filePath,
+			fileType,
+		)
+
+		if err != nil {
+			// Create a fake failed result to carry the error
+			return AgenticFixResultMsg{
+				Result: &agentic.FixResult{
+					Success:          false,
+					ErrorMessage:     "Error processing message: " + err.Error(),
+					IsConversational: false,
+				},
 			}
 		}
-	}
-	
-	// Handle fix failure
-	// Add error notification to history
-	return func() tea.Msg {
-		return AINotificationMsg{
-			Content: result.ErrorMessage,
-		}
+
+		return AgenticFixResultMsg{Result: result}
 	}
 }
