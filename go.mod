@@ -3,6 +3,7 @@ module github.com/user/terminal-intelligence
 go 1.25.6
 
 require (
+	github.com/atotto/clipboard v0.1.4
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/leanovate/gopter v0.2.11

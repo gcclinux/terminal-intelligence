@@ -21,7 +21,7 @@ type AIClient interface {
 	// Returns true if the service can be used, false otherwise.
 	// Returns an error if the availability check itself fails.
 	IsAvailable() (bool, error)
-	
+
 	// Generate generates AI response with streaming support.
 	// Parameters:
 	//   - prompt: The input prompt for the AI model
@@ -32,7 +32,7 @@ type AIClient interface {
 	// The channel is closed when generation completes.
 	// Returns an error if generation cannot be started.
 	Generate(prompt string, model string, context []int) (<-chan string, error)
-	
+
 	// ListModels lists available models from the AI provider.
 	// Returns a slice of model identifiers that can be used with Generate.
 	// Returns an error if the model list cannot be retrieved.
@@ -41,13 +41,13 @@ type AIClient interface {
 
 // AgenticCodeFixer orchestrates the agentic code fixing workflow.
 // This is the main component that coordinates all aspects of autonomous code fixing:
-//   1. Detecting fix requests vs conversational messages
-//   2. Retrieving file context from the editor
-//   3. Constructing prompts with code context
-//   4. Calling the AI service to generate fixes
-//   5. Parsing AI responses to extract code fixes
-//   6. Validating and applying fixes to file content
-//   7. Generating change notifications
+//  1. Detecting fix requests vs conversational messages
+//  2. Retrieving file context from the editor
+//  3. Constructing prompts with code context
+//  4. Calling the AI service to generate fixes
+//  5. Parsing AI responses to extract code fixes
+//  6. Validating and applying fixes to file content
+//  7. Generating change notifications
 //
 // The fixer supports:
 //   - Single and multi-step fixes (multiple code changes in one request)
@@ -63,16 +63,17 @@ type AIClient interface {
 //   - Invalid fixes: Validates before applying, returns explanation on failure
 //   - Application failures: Preserves original content and notifies user
 type AgenticCodeFixer struct {
-	aiClient  AIClient  // The AI client for generating fixes
-	model     string    // The AI model to use for generation
+	aiClient  AIClient   // The AI client for generating fixes
+	model     string     // The AI model to use for generation
 	fixParser *FixParser // Parser for extracting and validating fixes
-	debug     bool      // Enable debug logging
+	debug     bool       // Enable debug logging
 }
 
 // NewAgenticCodeFixer creates a new agentic code fixer
 // Parameters:
 //   - aiClient: The AI client to use for generating fixes
 //   - model: The AI model to use for generation
+//
 // Returns a configured AgenticCodeFixer instance
 func NewAgenticCodeFixer(aiClient AIClient, model string) *AgenticCodeFixer {
 	return &AgenticCodeFixer{
@@ -125,10 +126,10 @@ func (f *AgenticCodeFixer) logDebug(format string, args ...interface{}) {
 // - 0.0: No fix keywords found
 func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 	f.logDebug("Analyzing message for fix request detection (length: %d chars)", len(message))
-	
+
 	// Normalize message for analysis
 	lowerMessage := strings.ToLower(strings.TrimSpace(message))
-	
+
 	// Check for explicit /fix command
 	if strings.HasPrefix(lowerMessage, "/fix") {
 		f.logInfo("Fix request detected via /fix command")
@@ -138,7 +139,7 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 			Keywords:     []string{"/fix"},
 		}
 	}
-	
+
 	// Check for explicit /ask command (conversational mode)
 	if strings.HasPrefix(lowerMessage, "/ask") {
 		f.logInfo("Conversational mode detected via /ask command")
@@ -148,7 +149,7 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 			Keywords:     []string{},
 		}
 	}
-	
+
 	// Define fix-related keywords
 	fixKeywords := []string{
 		"fix",
@@ -157,7 +158,7 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 		"modify",
 		"correct",
 	}
-	
+
 	// Find matching keywords
 	var matchedKeywords []string
 	for _, keyword := range fixKeywords {
@@ -165,7 +166,7 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 			matchedKeywords = append(matchedKeywords, keyword)
 		}
 	}
-	
+
 	// Calculate confidence based on matched keywords
 	if len(matchedKeywords) == 0 {
 		f.logDebug("No fix keywords found, treating as conversational")
@@ -175,10 +176,10 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 			Keywords:     []string{},
 		}
 	}
-	
+
 	// Determine confidence level
 	var confidence float64
-	
+
 	if len(matchedKeywords) >= 2 {
 		// Multiple keywords suggest strong fix intent
 		confidence = 0.9
@@ -194,7 +195,7 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 			"should",
 			"must",
 		}
-		
+
 		hasActionContext := false
 		for _, action := range actionWords {
 			if strings.Contains(lowerMessage, action) {
@@ -202,16 +203,16 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 				break
 			}
 		}
-		
+
 		if hasActionContext {
 			confidence = 0.8
 		} else {
 			confidence = 0.7
 		}
 	}
-	
+
 	f.logInfo("Fix request detected with confidence %.1f, keywords: %v", confidence, matchedKeywords)
-	
+
 	return FixDetectionResult{
 		IsFixRequest: true,
 		Confidence:   confidence,
@@ -233,12 +234,12 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 // Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 1.5
 func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 	var prompt strings.Builder
-	
+
 	// Section 1: System instructions
 	prompt.WriteString("You are an AI code assistant helping to fix code issues.\n")
 	prompt.WriteString("Your task is to analyze the user's request and generate a specific code fix.\n")
 	prompt.WriteString("Provide the complete fixed code in a markdown code block.\n\n")
-	
+
 	// Section 2: File metadata
 	prompt.WriteString("=== FILE METADATA ===\n")
 	prompt.WriteString("File Path: ")
@@ -247,7 +248,7 @@ func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 	prompt.WriteString("File Type: ")
 	prompt.WriteString(request.FileType)
 	prompt.WriteString("\n\n")
-	
+
 	// Section 3: Current file content
 	prompt.WriteString("=== CURRENT FILE CONTENT ===\n")
 	if strings.TrimSpace(request.FileContent) == "" {
@@ -260,12 +261,12 @@ func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 		}
 	}
 	prompt.WriteString("\n")
-	
+
 	// Section 4: User's fix request
 	prompt.WriteString("=== USER REQUEST ===\n")
 	prompt.WriteString(request.UserMessage)
 	prompt.WriteString("\n\n")
-	
+
 	// Section 5: Output format instructions
 	prompt.WriteString("=== INSTRUCTIONS ===\n")
 	prompt.WriteString("1. Analyze the user's request and the current file content\n")
@@ -278,7 +279,7 @@ func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 	prompt.WriteString("(your fixed code here)\n")
 	prompt.WriteString("```\n")
 	prompt.WriteString("5. Provide a brief explanation of the changes you made\n")
-	
+
 	return prompt.String()
 }
 
@@ -308,12 +309,12 @@ func (f *AgenticCodeFixer) ProcessMessage(
 ) (*FixResult, error) {
 	f.logInfo("Processing message for file: %s (type: %s)", filePath, fileType)
 	f.logDebug("File content length: %d bytes", len(fileContent))
-	
+
 	// Step 1: Check for preview mode command
 	previewMode := false
 	actualMessage := message
 	lowerMessage := strings.ToLower(strings.TrimSpace(message))
-	
+
 	if strings.HasPrefix(lowerMessage, "/preview") {
 		previewMode = true
 		f.logInfo("Preview mode enabled")
@@ -321,7 +322,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 		actualMessage = strings.TrimSpace(strings.TrimPrefix(message, "/preview"))
 		actualMessage = strings.TrimSpace(strings.TrimPrefix(actualMessage, "/PREVIEW"))
 		actualMessage = strings.TrimSpace(strings.TrimPrefix(actualMessage, "/Preview"))
-		
+
 		// If no message after /preview, return error
 		if strings.TrimSpace(actualMessage) == "" {
 			f.logError("Preview mode requested but no fix request provided")
@@ -335,10 +336,10 @@ func (f *AgenticCodeFixer) ProcessMessage(
 			}, nil
 		}
 	}
-	
+
 	// Step 2: Detect if this is a fix request
 	detection := f.IsFixRequest(actualMessage)
-	
+
 	// Step 3: If not a fix request, return conversational mode indicator
 	if !detection.IsFixRequest {
 		f.logInfo("Message classified as conversational, not a fix request")
@@ -351,7 +352,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 			PreviewMode:      false,
 		}, nil
 	}
-	
+
 	// Step 4: Validate that a file is open (Requirements 1.2, 7.1)
 	if strings.TrimSpace(filePath) == "" {
 		f.logError("Fix request received but no file is open")
@@ -364,7 +365,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 			PreviewMode:      false,
 		}, nil
 	}
-	
+
 	// Step 5: Create fix request
 	request := &FixRequest{
 		UserMessage: actualMessage,
@@ -373,7 +374,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 		FileType:    fileType,
 		PreviewMode: previewMode,
 	}
-	
+
 	// Validate the request
 	if err := request.Validate(); err != nil {
 		f.logError("Fix request validation failed: %v", err)
@@ -386,9 +387,9 @@ func (f *AgenticCodeFixer) ProcessMessage(
 			PreviewMode:      false,
 		}, nil
 	}
-	
+
 	f.logInfo("Fix request validated, proceeding to generate fix")
-	
+
 	// Step 6: Route to fix generation handler
 	return f.GenerateFix(request)
 }
@@ -407,7 +408,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 // Requirements: 2.1, 3.1, 3.2, 3.4
 func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) {
 	f.logInfo("Generating fix for file: %s", request.FilePath)
-	
+
 	// Step 1: Check if AI service is available (Requirement 7.2)
 	f.logDebug("Checking AI service availability")
 	available, err := f.aiClient.IsAvailable()
@@ -422,12 +423,12 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 		}, nil
 	}
 	f.logDebug("AI service is available")
-	
+
 	// Step 2: Construct prompt using prompt builder (Requirement 2.1)
 	f.logDebug("Building prompt for AI model")
 	prompt := f.BuildPrompt(request)
 	f.logDebug("Prompt built successfully (length: %d chars)", len(prompt))
-	
+
 	// Step 3: Call AI client to generate response (Requirement 2.1)
 	f.logInfo("Calling AI model: %s", f.model)
 	responseChan, err := f.aiClient.Generate(prompt, f.model, nil)
@@ -441,17 +442,17 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			IsConversational: false,
 		}, nil
 	}
-	
+
 	// Step 4: Collect the streaming response
 	f.logDebug("Collecting streaming response from AI")
 	var fullResponse strings.Builder
 	for chunk := range responseChan {
 		fullResponse.WriteString(chunk)
 	}
-	
+
 	responseText := fullResponse.String()
 	f.logDebug("AI response received (length: %d chars)", len(responseText))
-	
+
 	// Check if we got a response
 	if strings.TrimSpace(responseText) == "" {
 		f.logError("AI generated an empty response")
@@ -463,12 +464,12 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			IsConversational: false,
 		}, nil
 	}
-	
+
 	// Step 5: Parse response using FixParser (Requirement 3.1)
 	f.logDebug("Parsing AI response for code blocks")
 	codeBlocks := f.fixParser.ExtractCodeBlocks(responseText)
 	f.logInfo("Extracted %d code blocks from AI response", len(codeBlocks))
-	
+
 	// Check if we extracted any code blocks
 	if len(codeBlocks) == 0 {
 		f.logError("No code blocks found in AI response")
@@ -480,12 +481,12 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			IsConversational: false,
 		}, nil
 	}
-	
+
 	// Step 6: Identify which blocks are fixes (Requirement 3.2)
 	f.logDebug("Identifying fix blocks for file type: %s", request.FileType)
 	fixBlocks := f.fixParser.IdentifyFixBlocks(codeBlocks, request.FileType)
 	f.logInfo("Identified %d fix blocks", len(fixBlocks))
-	
+
 	// Check if we identified any fix blocks (Requirement 3.5, 7.3)
 	if len(fixBlocks) == 0 {
 		f.logError("Could not identify valid fix blocks in AI response")
@@ -497,7 +498,7 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			IsConversational: false,
 		}, nil
 	}
-	
+
 	// Step 7: Pre-validate all fix blocks before applying any changes (Requirement 10.5)
 	// This ensures all steps are compatible and won't conflict with each other
 	f.logDebug("Pre-validating %d fix blocks", len(fixBlocks))
@@ -512,11 +513,11 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 		}, nil
 	}
 	f.logDebug("Pre-validation successful")
-	
+
 	// Step 8: Order fix blocks for correct application sequence (Requirement 10.2)
 	f.logDebug("Ordering fix blocks for application")
 	orderedFixBlocks := f.orderFixBlocks(fixBlocks)
-	
+
 	// Step 9: Apply all fixes atomically (Requirement 10.1, 10.3)
 	// For preview mode, we generate the modified content but don't actually apply it
 	// For multiple blocks, we apply them in the determined order
@@ -540,21 +541,98 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 		}
 	}
 	f.logInfo("All fix blocks applied successfully")
-	
+
 	// Step 10: Generate a change summary
 	changesSummary := f.generateChangeSummary(request.FileContent, modifiedContent, request.FilePath, len(orderedFixBlocks), request.PreviewMode)
-	
-	// Step 11: Return successful result
+
+	// Step 11: Return successful result with inline diff
 	// In preview mode, we return the modified content but indicate it's a preview
 	f.logInfo("Fix generation completed successfully (preview: %v)", request.PreviewMode)
+
+	diffContent := f.generateInlineDiff(request.FileContent, modifiedContent)
+
 	return &FixResult{
 		Success:          true,
-		ModifiedContent:  modifiedContent,
+		ModifiedContent:  diffContent,
 		ChangesSummary:   changesSummary,
 		ErrorMessage:     "",
 		IsConversational: false,
 		PreviewMode:      request.PreviewMode,
 	}, nil
+}
+
+// generateInlineDiff creates an inline diff using special prefixes
+// It finds the chunk of changed lines and inserts ~DEL~ and ~ADD~ markers.
+// These markers are parsed by the EditorPane to show red/green lines.
+func (f *AgenticCodeFixer) generateInlineDiff(original, modified string) string {
+	origLines := strings.Split(original, "\n")
+	modLines := strings.Split(modified, "\n")
+
+	if len(origLines) == 0 && len(modLines) == 0 {
+		return ""
+	}
+
+	minLen := len(origLines)
+	if len(modLines) < minLen {
+		minLen = len(modLines)
+	}
+
+	firstDiff := -1
+	for i := 0; i < minLen; i++ {
+		if origLines[i] != modLines[i] {
+			firstDiff = i
+			break
+		}
+	}
+
+	if firstDiff == -1 {
+		if len(origLines) != len(modLines) {
+			firstDiff = minLen
+		} else {
+			return modified
+		}
+	}
+
+	maxSuffixOrig := len(origLines) - firstDiff
+	maxSuffixMod := len(modLines) - firstDiff
+	maxSuffix := maxSuffixOrig
+	if maxSuffixMod < maxSuffix {
+		maxSuffix = maxSuffixMod
+	}
+
+	lastOrigDiff := -1
+	lastModDiff := -1
+	for i := 0; i < maxSuffix; i++ {
+		origIdx := len(origLines) - 1 - i
+		modIdx := len(modLines) - 1 - i
+		if origLines[origIdx] != modLines[modIdx] {
+			lastOrigDiff = origIdx
+			lastModDiff = modIdx
+			break
+		}
+	}
+
+	if lastOrigDiff == -1 {
+		lastOrigDiff = len(origLines) - 1 - maxSuffix
+		lastModDiff = len(modLines) - 1 - maxSuffix
+	}
+
+	var result []string
+	result = append(result, origLines[:firstDiff]...)
+
+	for i := firstDiff; i <= lastOrigDiff; i++ {
+		result = append(result, "~DEL~"+origLines[i])
+	}
+
+	for i := firstDiff; i <= lastModDiff; i++ {
+		result = append(result, "~ADD~"+modLines[i])
+	}
+
+	if lastOrigDiff+1 < len(origLines) {
+		result = append(result, origLines[lastOrigDiff+1:]...)
+	}
+
+	return strings.Join(result, "\n")
 }
 
 // generateChangeSummary creates a human-readable summary of changes
@@ -568,12 +646,12 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 // Requirements: 5.1, 5.2, 5.3, 5.4, 5.5, 6.4
 func (f *AgenticCodeFixer) generateChangeSummary(originalContent, modifiedContent, filePath string, blockCount int, previewMode bool) string {
 	var summary strings.Builder
-	
+
 	// Preview mode header (Requirement 6.4)
 	if previewMode {
 		summary.WriteString("🔍 PREVIEW MODE - Changes NOT applied\n\n")
 	}
-	
+
 	// Header with file path (Requirement 5.1, 5.2)
 	if previewMode {
 		summary.WriteString("Proposed changes for ")
@@ -582,17 +660,17 @@ func (f *AgenticCodeFixer) generateChangeSummary(originalContent, modifiedConten
 	}
 	summary.WriteString(filePath)
 	summary.WriteString("\n\n")
-	
+
 	// Count lines changed
 	originalLines := strings.Split(strings.TrimSpace(originalContent), "\n")
 	modifiedLines := strings.Split(strings.TrimSpace(modifiedContent), "\n")
-	
+
 	if len(originalLines) == 1 && strings.TrimSpace(originalContent) == "" {
 		originalLines = []string{}
 	}
-	
+
 	summary.WriteString("Changes:\n")
-	
+
 	// Indicate if multiple code blocks were applied (Requirement 5.4)
 	if blockCount > 1 {
 		if previewMode {
@@ -601,7 +679,7 @@ func (f *AgenticCodeFixer) generateChangeSummary(originalContent, modifiedConten
 			summary.WriteString(fmt.Sprintf("- Applied %d code blocks\n", blockCount))
 		}
 	}
-	
+
 	// Describe what changed (Requirement 5.2)
 	if len(originalLines) == 0 {
 		if previewMode {
@@ -611,45 +689,45 @@ func (f *AgenticCodeFixer) generateChangeSummary(originalContent, modifiedConten
 		}
 	} else if len(modifiedLines) > len(originalLines) {
 		if previewMode {
-			summary.WriteString(fmt.Sprintf("- Would modify file: %d → %d lines (+%d)\n", 
+			summary.WriteString(fmt.Sprintf("- Would modify file: %d → %d lines (+%d)\n",
 				len(originalLines), len(modifiedLines), len(modifiedLines)-len(originalLines)))
 		} else {
-			summary.WriteString(fmt.Sprintf("- Modified file: %d → %d lines (+%d)\n", 
+			summary.WriteString(fmt.Sprintf("- Modified file: %d → %d lines (+%d)\n",
 				len(originalLines), len(modifiedLines), len(modifiedLines)-len(originalLines)))
 		}
 	} else if len(modifiedLines) < len(originalLines) {
 		if previewMode {
-			summary.WriteString(fmt.Sprintf("- Would modify file: %d → %d lines (-%d)\n", 
+			summary.WriteString(fmt.Sprintf("- Would modify file: %d → %d lines (-%d)\n",
 				len(originalLines), len(modifiedLines), len(originalLines)-len(modifiedLines)))
 		} else {
-			summary.WriteString(fmt.Sprintf("- Modified file: %d → %d lines (-%d)\n", 
+			summary.WriteString(fmt.Sprintf("- Modified file: %d → %d lines (-%d)\n",
 				len(originalLines), len(modifiedLines), len(originalLines)-len(modifiedLines)))
 		}
 	} else {
 		if previewMode {
-			summary.WriteString(fmt.Sprintf("- Would modify file: %d lines (same length, content changed)\n", 
+			summary.WriteString(fmt.Sprintf("- Would modify file: %d lines (same length, content changed)\n",
 				len(modifiedLines)))
 		} else {
-			summary.WriteString(fmt.Sprintf("- Modified file: %d lines (same length, content changed)\n", 
+			summary.WriteString(fmt.Sprintf("- Modified file: %d lines (same length, content changed)\n",
 				len(modifiedLines)))
 		}
 	}
-	
+
 	// Add location information (Requirement 5.3)
 	locationInfo := f.detectChangeLocations(originalLines, modifiedLines)
 	if locationInfo != "" {
 		summary.WriteString(locationInfo)
 	}
-	
+
 	summary.WriteString("\n")
-	
+
 	// Save and test reminders (Requirement 5.5)
 	if previewMode {
 		summary.WriteString("ℹ️  This is a preview. To apply these changes, send the request without /preview")
 	} else {
 		summary.WriteString("⚠️  Remember to save the file (Ctrl+S) and test the changes!")
 	}
-	
+
 	return summary.String()
 }
 
@@ -661,26 +739,26 @@ func (f *AgenticCodeFixer) detectChangeLocations(originalLines, modifiedLines []
 	if len(originalLines) == 0 || len(modifiedLines) == 0 {
 		return ""
 	}
-	
+
 	var locations strings.Builder
-	
+
 	// Find the first and last lines that differ
 	firstDiff := -1
 	lastDiff := -1
-	
+
 	// Find first difference
 	minLen := len(originalLines)
 	if len(modifiedLines) < minLen {
 		minLen = len(modifiedLines)
 	}
-	
+
 	for i := 0; i < minLen; i++ {
 		if originalLines[i] != modifiedLines[i] {
 			firstDiff = i
 			break
 		}
 	}
-	
+
 	// If all common lines are the same, the difference is at the end
 	if firstDiff == -1 {
 		if len(originalLines) != len(modifiedLines) {
@@ -690,7 +768,7 @@ func (f *AgenticCodeFixer) detectChangeLocations(originalLines, modifiedLines []
 			return ""
 		}
 	}
-	
+
 	// Find last difference (search from the end)
 	for i := 0; i < minLen; i++ {
 		origIdx := len(originalLines) - 1 - i
@@ -700,25 +778,25 @@ func (f *AgenticCodeFixer) detectChangeLocations(originalLines, modifiedLines []
 			break
 		}
 	}
-	
+
 	// If we didn't find a last diff, it means changes extend to the end
 	if lastDiff == -1 {
 		lastDiff = len(modifiedLines) - 1
 	}
-	
+
 	// Generate location information
 	if firstDiff == lastDiff {
 		locations.WriteString(fmt.Sprintf("- Location: Line %d\n", firstDiff+1))
 	} else {
 		locations.WriteString(fmt.Sprintf("- Location: Lines %d-%d\n", firstDiff+1, lastDiff+1))
 	}
-	
+
 	// Try to detect function names near the changes (simple heuristic)
 	functionName := f.detectNearbyFunction(modifiedLines, firstDiff)
 	if functionName != "" {
 		locations.WriteString(fmt.Sprintf("- Context: Near function '%s'\n", functionName))
 	}
-	
+
 	return locations.String()
 }
 
@@ -732,10 +810,10 @@ func (f *AgenticCodeFixer) detectNearbyFunction(lines []string, lineNum int) str
 	if searchStart < 0 {
 		searchStart = 0
 	}
-	
+
 	for i := lineNum; i >= searchStart; i-- {
 		line := strings.TrimSpace(lines[i])
-		
+
 		// Bash/Shell function patterns:
 		// function name() { ... }
 		// name() { ... }
@@ -758,7 +836,7 @@ func (f *AgenticCodeFixer) detectNearbyFunction(lines []string, lineNum int) str
 				}
 			}
 		}
-		
+
 		// PowerShell function pattern:
 		// function Name { ... }
 		// Function Name { ... }
@@ -769,9 +847,10 @@ func (f *AgenticCodeFixer) detectNearbyFunction(lines []string, lineNum int) str
 			}
 		}
 	}
-	
+
 	return ""
 }
+
 // ApplyFix applies a code fix to the file content using a transactional approach
 // This method handles the application of code changes while:
 // - Creating a backup before applying (Requirement 7.4)
@@ -798,10 +877,10 @@ func (f *AgenticCodeFixer) ApplyFix(
 	fileType string,
 ) (string, error) {
 	f.logDebug("Applying fix (original content: %d bytes, fix code: %d bytes)", len(originalContent), len(fixCode))
-	
+
 	// Step 1: Create backup of original content (Requirement 7.4)
 	backup := originalContent
-	
+
 	// Step 2: Validate inputs (Requirement 3.5, 7.3)
 	if strings.TrimSpace(fixCode) == "" {
 		// Rollback: return original content
@@ -826,7 +905,7 @@ func (f *AgenticCodeFixer) ApplyFix(
 		f.logError("Applied fix resulted in empty content, rolling back")
 		return backup, fmt.Errorf("applied fix resulted in empty or whitespace-only content")
 	}
-	
+
 	// Additional validation: check that the fix is syntactically valid
 	f.logDebug("Validating fix syntax for file type: %s", fileType)
 	if err := f.fixParser.ValidateFixSyntax(tempContent, fileType); err != nil {
@@ -839,6 +918,7 @@ func (f *AgenticCodeFixer) ApplyFix(
 	f.logDebug("Fix applied successfully (result: %d bytes)", len(tempContent))
 	return tempContent, nil
 }
+
 // orderFixBlocks determines the correct order for applying multiple fix blocks
 // to maintain code validity at each step (Requirement 10.2)
 //
@@ -902,7 +982,6 @@ func (f *AgenticCodeFixer) orderFixBlocks(blocks []CodeBlock) []CodeBlock {
 	return ordered
 }
 
-
 // validateMultiStepFix performs pre-validation on all fix blocks before applying any changes
 // This ensures that all steps are compatible and won't conflict with each other
 // (Requirement 10.5)
@@ -921,7 +1000,7 @@ func (f *AgenticCodeFixer) orderFixBlocks(blocks []CodeBlock) []CodeBlock {
 //   - error: Error if validation fails, nil if all checks pass
 func (f *AgenticCodeFixer) validateMultiStepFix(blocks []CodeBlock, fileType string) error {
 	f.logDebug("Validating multi-step fix with %d blocks", len(blocks))
-	
+
 	if len(blocks) == 0 {
 		f.logError("No fix blocks to validate")
 		return fmt.Errorf("no fix blocks to validate")
@@ -946,7 +1025,7 @@ func (f *AgenticCodeFixer) validateMultiStepFix(blocks []CodeBlock, fileType str
 	// Check 2: For multiple blocks, check for potential conflicts
 	if len(blocks) > 1 {
 		f.logDebug("Checking for conflicts between %d blocks", len(blocks))
-		
+
 		// Check for duplicate blocks (same code content)
 		seen := make(map[string]int)
 		for i, block := range blocks {
@@ -977,7 +1056,7 @@ func (f *AgenticCodeFixer) validateMultiStepFix(blocks []CodeBlock, fileType str
 			f.logError("Cannot mix whole-file replacement with partial fixes")
 			return fmt.Errorf("cannot mix whole-file replacement with partial fixes; found %d blocks with 1 whole-file replacement", len(blocks))
 		}
-		
+
 		f.logDebug("No conflicts detected between blocks")
 	}
 

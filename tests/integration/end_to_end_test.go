@@ -287,7 +287,7 @@ func TestEndToEnd_ExitWorkflow(t *testing.T) {
 		editorPane.SetContent("unsaved content")
 
 		// Try to quit
-		quitMsg := tea.KeyMsg{Type: tea.KeyCtrlC}
+		quitMsg := tea.KeyMsg{Type: tea.KeyCtrlQ}
 		_, cmd := app.Update(quitMsg)
 
 		// Should show confirmation, not quit
@@ -333,7 +333,7 @@ func TestEndToEnd_TerminalResizeHandling(t *testing.T) {
 		fm := editorPane.GetFileManager()
 		filename := "test.sh"
 		content := "#!/bin/bash\necho 'test'\n"
-		
+
 		err := fm.CreateFile(filename, content)
 		if err != nil {
 			t.Fatalf("Failed to create file: %v", err)
@@ -349,11 +349,11 @@ func TestEndToEnd_TerminalResizeHandling(t *testing.T) {
 		_, _ = app.Update(msg2)
 
 		// Verify panes resized
-		if editorPane.GetWidth() != 64 {  // (120 / 2) + 4
+		if editorPane.GetWidth() != 64 { // (120 / 2) + 4
 			t.Errorf("Expected editor width 64, got %d", editorPane.GetWidth())
 		}
 
-		if editorPane.GetHeight() != 33 {  // 40 - 3 for header - 3 for editor title - 1 for status bar
+		if editorPane.GetHeight() != 33 { // 40 - 3 for header - 3 for editor title - 1 for status bar
 			t.Errorf("Expected editor height 33, got %d", editorPane.GetHeight())
 		}
 

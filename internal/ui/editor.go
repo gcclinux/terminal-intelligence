@@ -44,6 +44,7 @@ type EditorPane struct {
 	width           int                      // Pane width
 	height          int                      // Pane height
 	focused         bool                     // Whether this pane is focused
+	diffMarkers     map[int]string           // Tracks red/green line styling for diffs
 }
 
 // NewEditorPane creates a new editor pane.
@@ -66,6 +67,7 @@ func NewEditorPane(fm *filemanager.FileManager) *EditorPane {
 		width:           0,
 		height:          0,
 		focused:         false,
+		diffMarkers:     make(map[int]string),
 	}
 }
 
@@ -98,6 +100,7 @@ func (e *EditorPane) LoadFile(filepath string) error {
 	e.cursorLine = 0
 	e.cursorCol = 0
 	e.scrollOffset = 0
+	e.diffMarkers = make(map[int]string)
 
 	// Determine file type from extension
 	fileType := determineFileType(filepath)
@@ -121,6 +124,28 @@ func (e *EditorPane) SaveFile() error {
 		return fmt.Errorf("no file loaded")
 	}
 
+	if len(e.diffMarkers) > 0 {
+		lines := strings.Split(e.content, "\n")
+		var cleaned []string
+		for i, line := range lines {
+			if color, ok := e.diffMarkers[i]; ok {
+				if color == "red" {
+					continue
+				}
+			}
+			cleaned = append(cleaned, line)
+		}
+		e.content = strings.Join(cleaned, "\n")
+		e.diffMarkers = make(map[int]string)
+
+		if e.cursorLine >= len(cleaned) {
+			e.cursorLine = len(cleaned) - 1
+			if e.cursorLine < 0 {
+				e.cursorLine = 0
+			}
+		}
+	}
+
 	err := e.fileManager.WriteFile(e.currentFile.Filepath, e.content)
 	if err != nil {
 		return err
@@ -140,6 +165,7 @@ func (e *EditorPane) CloseFile() {
 	e.cursorCol = 0
 	e.scrollOffset = 0
 	e.currentFile = nil
+	e.diffMarkers = nil
 }
 
 // GetContent returns current editor content.
@@ -158,9 +184,25 @@ func (e *EditorPane) GetContent() string {
 // Parameters:
 //   - content: New content to set
 func (e *EditorPane) SetContent(content string) {
-	e.content = content
+	lines := strings.Split(content, "\n")
+	var cleaned []string
+	e.diffMarkers = make(map[int]string)
+
+	for _, line := range lines {
+		if strings.HasPrefix(line, "~DEL~") {
+			e.diffMarkers[len(cleaned)] = "red"
+			cleaned = append(cleaned, strings.TrimPrefix(line, "~DEL~"))
+		} else if strings.HasPrefix(line, "~ADD~") {
+			e.diffMarkers[len(cleaned)] = "green"
+			cleaned = append(cleaned, strings.TrimPrefix(line, "~ADD~"))
+		} else {
+			cleaned = append(cleaned, line)
+		}
+	}
+
+	e.content = strings.Join(cleaned, "\n")
 	if e.currentFile != nil {
-		e.currentFile.IsModified = (content != e.originalContent)
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
 }
 
@@ -170,7 +212,20 @@ func (e *EditorPane) SetContent(content string) {
 // Returns:
 //   - bool: True if content differs from originalContent, false otherwise
 func (e *EditorPane) HasUnsavedChanges() bool {
-	return e.content != e.originalContent
+	return e.content != e.originalContent || len(e.diffMarkers) > 0
+}
+
+// GetCurrentLine returns the text of the line currently under the cursor.
+// Used for copying the current line to clipboard.
+//
+// Returns:
+//   - string: The current line text
+func (e *EditorPane) GetCurrentLine() string {
+	lines := strings.Split(e.content, "\n")
+	if e.cursorLine >= 0 && e.cursorLine < len(lines) {
+		return lines[e.cursorLine]
+	}
+	return ""
 }
 
 // Update handles messages for the editor pane.
@@ -278,6 +333,30 @@ func (e *EditorPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	return nil
 }
 
+// shiftMarkers shifts diff markers when rows are inserted or deleted
+func (e *EditorPane) shiftMarkers(fromLine int, amount int) {
+	if len(e.diffMarkers) == 0 {
+		return
+	}
+	newMarkers := make(map[int]string)
+	for idx, color := range e.diffMarkers {
+		if idx >= fromLine {
+			if amount > 0 {
+				newMarkers[idx+amount] = color
+			} else {
+				if idx < fromLine-amount {
+					// dropped line
+				} else {
+					newMarkers[idx+amount] = color
+				}
+			}
+		} else {
+			newMarkers[idx] = color
+		}
+	}
+	e.diffMarkers = newMarkers
+}
+
 // insertChar inserts a character at the cursor position.
 // Updates the modified flag after insertion.
 //
@@ -334,11 +413,12 @@ func (e *EditorPane) insertNewline() {
 
 		e.cursorLine++
 		e.cursorCol = 0
+		e.shiftMarkers(e.cursorLine, 1)
 	}
 
 	e.content = strings.Join(lines, "\n")
 	if e.currentFile != nil {
-		e.currentFile.IsModified = (e.content != e.originalContent)
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
 	e.adjustScroll()
 }
@@ -372,6 +452,7 @@ func (e *EditorPane) deleteChar() {
 		copy(newLines[e.cursorLine:], lines[e.cursorLine+1:])
 		lines = newLines
 
+		e.shiftMarkers(e.cursorLine, -1)
 		e.cursorLine--
 		e.cursorCol = len(prevLine)
 		e.adjustScroll()
@@ -379,7 +460,7 @@ func (e *EditorPane) deleteChar() {
 
 	e.content = strings.Join(lines, "\n")
 	if e.currentFile != nil {
-		e.currentFile.IsModified = (e.content != e.originalContent)
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
 }
 
@@ -410,12 +491,13 @@ func (e *EditorPane) deleteNextChar() {
 		copy(newLines, lines[:e.cursorLine+1])
 		copy(newLines[e.cursorLine+1:], lines[e.cursorLine+2:])
 		lines = newLines
+		e.shiftMarkers(e.cursorLine+1, -1)
 		// cursorCol stays the same (at the join point)
 	}
 
 	e.content = strings.Join(lines, "\n")
 	if e.currentFile != nil {
-		e.currentFile.IsModified = (e.content != e.originalContent)
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
 }
 
@@ -513,6 +595,14 @@ func (e *EditorPane) View() string {
 					line = line[:e.cursorCol] + cursorStyle.Render(string(line[e.cursorCol])) + line[e.cursorCol+1:]
 				} else {
 					line += cursorStyle.Render(" ")
+				}
+			}
+
+			if color, ok := e.diffMarkers[fileLineIdx]; ok {
+				if color == "red" {
+					line = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line)
+				} else if color == "green" {
+					line = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Render(line)
 				}
 			}
 

@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/agentic"
@@ -536,7 +537,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		switch msg.String() {
-		case "ctrl+c", "ctrl+q":
+		case "ctrl+q":
 			// Check for unsaved changes
 			if a.editorPane.HasUnsavedChanges() && !a.forceQuit {
 				a.showExitConfirmation = true
@@ -545,6 +546,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear AI history on normal exit
 			a.aiPane.ClearHistory()
 			return a, tea.Quit
+
+		case "ctrl+c":
+			var textToCopy string
+
+			if a.activePane == types.EditorPaneType {
+				textToCopy = a.editorPane.GetCurrentLine()
+			} else if a.activePane == types.AIPaneType || a.activePane == types.AIResponsePaneType {
+				textToCopy = a.aiPane.GetSelectedCodeBlock()
+			}
+
+			if textToCopy != "" {
+				err := clipboard.WriteAll(textToCopy)
+				if err != nil {
+					a.statusMessage = "Error copying to clipboard: " + err.Error()
+				} else {
+					a.statusMessage = "Copied to clipboard"
+				}
+			} else {
+				a.statusMessage = "Nothing to copy"
+			}
+			return a, nil
 
 		case "ctrl+b":
 			// Open backup picker

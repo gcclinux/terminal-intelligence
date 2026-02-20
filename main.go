@@ -55,7 +55,8 @@ func main() {
 		fmt.Println("  Ctrl+S      - Save current file")
 		fmt.Println("  Ctrl+R      - Execute current script")
 		fmt.Println("  Ctrl+Enter  - Send message to AI")
-		fmt.Println("  Ctrl+C/Q    - Quit application")
+		fmt.Println("  Ctrl+C      - Copy selected line or AI block")
+		fmt.Println("  Ctrl+Q      - Quit application")
 		fmt.Println()
 		os.Exit(0)
 	}
