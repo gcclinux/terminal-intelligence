@@ -11,7 +11,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/ui"
 )
 
-const version = "0.1.0"
+var version = "0.0.1.0"
 
 // Build number (injected at compile time via -ldflags)
 var buildNumber = "dev"

@@ -2,10 +2,10 @@
 
 # Variables
 BINARY_NAME=ti
-VERSION=0.1.0
+VERSION=0.0.1.2
 BUILD_DIR=build
 GO=go
-BUILD_NUMBER=$(shell echo $$(($(shell git rev-list --count HEAD 2>/dev/null || echo "0") + 1)))
+BUILD_NUMBER=$(shell printf "%04d" $$(($(shell git rev-list --count HEAD 2>/dev/null || echo "0") + 1)))
 GOFLAGS=-ldflags="-s -w -X main.version=$(VERSION) -X main.buildNumber=$(BUILD_NUMBER)"
 
 # Default target
