@@ -218,7 +218,7 @@ You can edit this file to customize your settings. The application will load it 
 ```json
 {
   "agent": "ollama",
-  "model": "llama2",
+  "model": "qwen2.5-coder:3b",
   "ollama_url": "http://localhost:11434",
   "gemini_api": "",
   "workspace": "/home/user/ti-workspace"
@@ -230,7 +230,7 @@ You can edit this file to customize your settings. The application will load it 
 ```json
 {
   "agent": "gemini",
-  "model": "gemini-2.5-flash-lite",
+  "model": "gemini-3-flash-lite",
   "ollama_url": "",
   "gemini_api": "your-api-key-here",
   "workspace": "/home/user/project-workspace"
@@ -240,7 +240,7 @@ You can edit this file to customize your settings. The application will load it 
 **Configuration Fields:**
 
 - `agent`: AI provider - `"ollama"` or `"gemini"`
-- `model`: Model name (e.g., `"llama2"`, `"qwen2.5-coder:3b"`, `"gemini-2.5-flash-lite"`)
+- `model`: Model name (e.g., `"llama2"`, `"qwen2.5-coder:3b"`, `"gemini-3-flash-lite, gemini-3-pro-preview"`)
 - `ollama_url`: Ollama server URL (only for Ollama provider)
 - `gemini_api`: Gemini API key (required for Gemini provider)
 - `workspace`: Workspace directory path (absolute path to your workspace folder)
