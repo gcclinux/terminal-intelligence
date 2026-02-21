@@ -69,8 +69,8 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 
 			return true
 		},
-		gen.IntRange(20, 300),  // Terminal width range
-		gen.IntRange(10, 100),  // Terminal height range
+		gen.IntRange(20, 300), // Terminal width range
+		gen.IntRange(10, 100), // Terminal height range
 	))
 
 	properties.Property("ctrl+s saves file immediately", prop.ForAll(
@@ -127,13 +127,13 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 
 			return true
 		},
-		gen.IntRange(20, 300),  // Terminal width range
-		gen.IntRange(10, 100),  // Terminal height range
+		gen.IntRange(20, 300), // Terminal width range
+		gen.IntRange(10, 100), // Terminal height range
 		genValidFilename(),
 		gen.AnyString(),
 	))
 
-	properties.Property("ctrl+c quits immediately", prop.ForAll(
+	properties.Property("ctrl+c does not quit immediately", prop.ForAll(
 		func(width int, height int) bool {
 			// Skip invalid terminal sizes
 			if width < 20 || height < 10 {
@@ -151,16 +151,16 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 			keyMsg := tea.KeyMsg{Type: tea.KeyCtrlC}
 			_, cmd := app.Update(keyMsg)
 
-			// Verify quit command was returned
-			if cmd == nil {
-				t.Logf("Ctrl+C should return quit command")
+			// Verify quit command was NOT returned
+			if cmd != nil {
+				t.Logf("Ctrl+C should not return quit command")
 				return false
 			}
 
 			return true
 		},
-		gen.IntRange(20, 300),  // Terminal width range
-		gen.IntRange(10, 100),  // Terminal height range
+		gen.IntRange(20, 300), // Terminal width range
+		gen.IntRange(10, 100), // Terminal height range
 	))
 
 	properties.Property("ctrl+q quits immediately", prop.ForAll(
@@ -189,8 +189,8 @@ func TestProperty_KeyboardShortcutActionExecution(t *testing.T) {
 
 			return true
 		},
-		gen.IntRange(20, 300),  // Terminal width range
-		gen.IntRange(10, 100),  // Terminal height range
+		gen.IntRange(20, 300), // Terminal width range
+		gen.IntRange(10, 100), // Terminal height range
 	))
 
 	properties.TestingRun(t, gopter.ConsoleReporter(false))

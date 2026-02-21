@@ -2,3 +2,4 @@
 .local/
 build/*
 .ti/
+.antigravity/

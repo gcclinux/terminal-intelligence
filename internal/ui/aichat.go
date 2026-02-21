@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"bufio"
+	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -61,6 +64,9 @@ type AIChatPane struct {
 	editingField     bool                // Whether currently editing a field
 	editBuffer       string              // Buffer for editing field value
 	editCursorPos    int                 // Cursor position within edit buffer
+	terminalMode     bool                // Whether terminal execution is active
+	cmdRunning       bool                // Whether the command is currently running
+	terminalOutput   []string            // Output lines from terminal execution
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -93,6 +99,18 @@ type SaveConfigMsg struct {
 	Values []string // Config field values
 }
 
+// TerminalOutputMsg is sent when a line of output is received from a running command.
+type TerminalOutputMsg struct {
+	Line   string
+	Output chan tea.Msg
+}
+
+// TerminalDoneMsg is sent when command execution finishes.
+type TerminalDoneMsg struct {
+	ExitCode int
+	Err      error
+}
+
 // NewAIChatPane creates a new AI chat pane.
 // Initializes an empty conversation with the specified AI client and model.
 // Defaults to "llama2" model if none is specified.
@@ -109,17 +127,18 @@ func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPan
 		model = "llama2"
 	}
 	return &AIChatPane{
-		messages:     []types.ChatMessage{},
-		inputBuffer:  "",
-		aiClient:     client,
-		model:        model,
-		provider:     provider,
-		scrollOffset: 0,
-		width:        0,
-		height:       0,
-		focused:      false,
-		streaming:    false,
-		activeArea:   0, // 0: Input, 1: Response
+		messages:       []types.ChatMessage{},
+		inputBuffer:    "",
+		aiClient:       client,
+		model:          model,
+		provider:       provider,
+		scrollOffset:   0,
+		width:          0,
+		height:         0,
+		focused:        false,
+		streaming:      false,
+		activeArea:     0, // 0: Input, 1: Response
+		terminalOutput: []string{},
 	}
 }
 
@@ -338,9 +357,89 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 		}
 	case AINotificationMsg:
 		a.DisplayNotification(msg.Content)
+	case TerminalOutputMsg:
+		a.terminalOutput = append(a.terminalOutput, msg.Line)
+		if a.terminalMode {
+			a.viewModeScroll = len(a.terminalOutput)
+		}
+		return func() tea.Msg {
+			return <-msg.Output
+		}
+	case TerminalDoneMsg:
+		a.cmdRunning = false
+		a.terminalOutput = append(a.terminalOutput, "")
+		if msg.Err != nil {
+			a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process failed: %v]", msg.Err))
+		} else {
+			a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process exited with code %d]", msg.ExitCode))
+		}
+		if a.terminalMode {
+			a.viewModeScroll = len(a.terminalOutput)
+		}
+		return nil
 	}
 
 	return nil
+}
+
+// executeCommand executes a script and streams output to Bubble Tea messages.
+func (a *AIChatPane) executeCommand(script string) tea.Cmd {
+	outChan := make(chan tea.Msg)
+
+	go func() {
+		cmd := exec.Command("sh", "-c", script)
+
+		stdout, _ := cmd.StdoutPipe()
+		stderr, _ := cmd.StderrPipe()
+
+		if err := cmd.Start(); err != nil {
+			outChan <- TerminalDoneMsg{Err: err}
+			return
+		}
+
+		textChan := make(chan string)
+		doneCount := 0
+
+		go func() {
+			scanner := bufio.NewScanner(stdout)
+			for scanner.Scan() {
+				textChan <- scanner.Text()
+			}
+			textChan <- "\x00DONE\x00"
+		}()
+
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				textChan <- scanner.Text()
+			}
+			textChan <- "\x00DONE\x00"
+		}()
+
+		for doneCount < 2 {
+			text := <-textChan
+			if text == "\x00DONE\x00" {
+				doneCount++
+			} else {
+				outChan <- TerminalOutputMsg{Line: text, Output: outChan}
+			}
+		}
+
+		err := cmd.Wait()
+		exitCode := 0
+		if err != nil {
+			if exitErr, ok := err.(*exec.ExitError); ok {
+				exitCode = exitErr.ExitCode()
+			} else {
+				exitCode = -1
+			}
+		}
+		outChan <- TerminalDoneMsg{ExitCode: exitCode, Err: err}
+	}()
+
+	return func() tea.Msg {
+		return <-outChan
+	}
 }
 
 // handleKeyPress handles keyboard input for the AI pane.
@@ -472,18 +571,35 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	if a.viewMode {
 		keyStr := msg.String()
 		switch keyStr {
-		case "esc", "q":
+		case "esc", "q", "2":
 			a.viewMode = false
 			a.copyMode = true
 			a.viewModeScroll = 0
-		case "ctrl+p":
+			a.terminalMode = false
+		case "ctrl+p", "1":
 			// Signal to insert code (will be handled by app)
 			a.viewMode = false
 			a.copyMode = false
 			a.viewModeScroll = 0
+			a.terminalMode = false
 			// Return a custom message to trigger insert
 			return func() tea.Msg {
 				return InsertCodeMsg{}
+			}
+		case "0":
+			if !a.cmdRunning {
+				a.terminalMode = true
+				a.cmdRunning = true
+
+				var initOutput []string
+				for _, line := range strings.Split(a.codeBlocks[a.selectedBlock], "\n") {
+					initOutput = append(initOutput, "> "+line)
+				}
+				initOutput = append(initOutput, "")
+
+				a.terminalOutput = initOutput
+				a.viewModeScroll = 0
+				return a.executeCommand(a.codeBlocks[a.selectedBlock])
 			}
 		case "up", "k":
 			if a.viewModeScroll > 0 {
@@ -1075,24 +1191,43 @@ func (a *AIChatPane) renderViewMode() string {
 
 	titleBar := titleStyle.Render(title)
 
-	instructions := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
-		Padding(0, 1).
-		Width(a.width - 4). // Match the normal pane width
-		Render("[Ctrl+P] Insert into Editor | [↑↓/PgUp/PgDn] Scroll | [Esc] Back")
+	var instructions string
+	var displayLinesSource []string
+
+	if a.terminalMode {
+		displayLinesSource = a.terminalOutput
+		instructions = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("238")).
+			Bold(true).
+			MarginTop(1).
+			MarginBottom(1).
+			Padding(0, 1).
+			Width(a.width - 4).
+			Render(" ⚙  [2/Esc] Return to Code  |  [↑↓/PgUp/PgDn] Scroll Terminal ")
+	} else {
+		displayLinesSource = strings.Split(codeBlock, "\n")
+		instructions = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("238")).
+			Bold(true).
+			MarginTop(1).
+			MarginBottom(1).
+			Padding(0, 1).
+			Width(a.width - 4).
+			Render(" ⚡ [0] Execute CMD  |  [1/Ctrl+P] Insert  |  [2/Esc] Return  |  [↑↓] Scroll ")
+	}
 
 	// Calculate available height for code content
 	// a.height is the total pane height
 	// Total must equal a.height to match normal View():
-	// titleBar(1) + instructions(1) + border(2) + codeAreaHeight = a.height
-	codeAreaHeight := a.height - 4
+	// titleBar(1) + margin gap(1) + instructions(1) + margin gap(1) + border(2) + codeAreaHeight = a.height
+	codeAreaHeight := a.height - 6
 	if codeAreaHeight < 3 {
 		codeAreaHeight = 3
 	}
 
-	// Split code block into lines
-	codeLines := strings.Split(codeBlock, "\n")
-	totalCodeLines := len(codeLines)
+	totalLines := len(displayLinesSource)
 
 	// Truncate content width to prevent wrapping (account for scrollbar + border + padding)
 	contentWidth := a.width - 10
@@ -1101,7 +1236,7 @@ func (a *AIChatPane) renderViewMode() string {
 	}
 
 	// Clamp scroll offset
-	maxScroll := totalCodeLines - codeAreaHeight
+	maxScroll := totalLines - codeAreaHeight
 	if maxScroll < 0 {
 		maxScroll = 0
 	}
@@ -1113,12 +1248,12 @@ func (a *AIChatPane) renderViewMode() string {
 	}
 
 	// Determine scrollbar
-	showScrollbar := totalCodeLines > codeAreaHeight
+	showScrollbar := totalLines > codeAreaHeight
 	var scrollbarThumbStart, scrollbarThumbEnd int
 
 	if showScrollbar {
 		scrollbarH := float64(codeAreaHeight)
-		contentRatio := float64(codeAreaHeight) / float64(totalCodeLines)
+		contentRatio := float64(codeAreaHeight) / float64(totalLines)
 		thumbHeight := int(scrollbarH * contentRatio)
 		if thumbHeight < 1 {
 			thumbHeight = 1
@@ -1146,8 +1281,8 @@ func (a *AIChatPane) renderViewMode() string {
 		lineIdx := a.viewModeScroll + i
 
 		var line string
-		if lineIdx < totalCodeLines {
-			line = codeLines[lineIdx]
+		if lineIdx < totalLines {
+			line = displayLinesSource[lineIdx]
 			if len(line) > contentWidth {
 				line = line[:contentWidth-3] + "..."
 			}

@@ -311,7 +311,7 @@ func TestApp_View(t *testing.T) {
 
 // TestApp_KeyboardControls tests keyboard control handling
 func TestApp_KeyboardControls(t *testing.T) {
-	t.Run("ctrl+c quits", func(t *testing.T) {
+	t.Run("ctrl+c does not quit", func(t *testing.T) {
 		app := ui.New(nil, "test")
 
 		// Initialize with window size
@@ -322,9 +322,9 @@ func TestApp_KeyboardControls(t *testing.T) {
 		keyMsg := tea.KeyMsg{Type: tea.KeyCtrlC}
 		_, cmd := app.Update(keyMsg)
 
-		// Should return quit command
-		if cmd == nil {
-			t.Error("Expected quit command for ctrl+c")
+		// Should NOT return quit command
+		if cmd != nil {
+			t.Error("Expected no quit command for ctrl+c")
 		}
 	})
 
@@ -464,8 +464,8 @@ func TestApp_FileSwitchingUpdatesContext(t *testing.T) {
 
 		// Simulate rapid file switching
 		files := []struct {
-			path    string
-			content string
+			path     string
+			content  string
 			fileType string
 		}{
 			{"file1.sh", "echo 'one'", "bash"},

@@ -98,6 +98,16 @@ The right pane is now split horizontally:
 - When in the AI pane, press **Ctrl+Enter** to send your message WITH the current editor content as context
 - The AI will see your code and can help you with it
 
+### 6. Interacting with AI Code Blocks
+
+- When the AI generates a code block, you can interact with it directly.
+- Press **Ctrl+Y** to enter Code Block Selection Mode.
+- Use **Up/Down** arrows to navigate between generated code blocks.
+- Press **Enter** on the selected code block to view action options:
+  - **[0] Execute CMD**: Execute the code block in an inline terminal. (Use **Up/Down** or **PgUp/PgDn** to scroll output)
+  - **[1] / [Ctrl+P] Insert**: Insert the code block directly into the editor pane.
+  - **[2] / [Esc] Return**: Return to the code block selection view.
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
@@ -107,8 +117,9 @@ The right pane is now split horizontally:
 | **Ctrl+S** | Save current file |
 | **Tab** | Cycle between Editor, AI Input, and AI Response |
 | **Ctrl+Enter** | Send AI message with code context |
+| **Ctrl+Y** | Enter AI Code Block Selection |
 | **Ctrl+Q** | Quit (will prompt if unsaved changes) |
-| **Esc** | Cancel dialogs |
+| **Esc** | Cancel dialogs / Return |
 
 ## Example Workflow
 

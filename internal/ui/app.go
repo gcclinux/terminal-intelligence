@@ -351,6 +351,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
+	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg:
+		cmd := a.aiPane.Update(msg)
+		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
+
 	case tea.KeyMsg:
 		// Handle help dialog
 		if a.showHelp {
@@ -1209,7 +1214,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  Ctrl+Q    Quit\n\n"
 		helpText += "AI\n"
 		helpText += "--\n"
-		helpText += "  Ctrl+Y    List code blocks\n"
+		helpText += "  Ctrl+Y    List code blocks (Execute/Insert/Return)\n"
 		helpText += "  Ctrl+P    Insert selected code into editor\n"
 		helpText += "  Ctrl+A    Insert full AI response into file\n"
 		helpText += "  Ctrl+T    Clear chat / New chat\n\n"
