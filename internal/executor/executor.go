@@ -37,7 +37,7 @@ func (ce *CommandExecutor) ExecuteCommand(command string, cwd string) (*types.Co
 	// Create command using shell to properly handle complex commands
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
-		cmd = exec.Command("cmd", "/c", command)
+		cmd = exec.Command("powershell", "-NoProfile", "-Command", command)
 	} else {
 		cmd = exec.Command("sh", "-c", command)
 	}

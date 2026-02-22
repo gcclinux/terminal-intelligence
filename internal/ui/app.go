@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -289,11 +290,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.editorPane.focused = true
 				a.aiPane.focused = false
 			} else {
-				// No file open, prompt for new file
-				a.pendingCodeInsert = selectedCode
-				a.showFilePrompt = true
-				a.filePromptBuffer = ""
-				a.statusMessage = "Enter filename to insert code"
+				// No file open — load code into editor as unsaved buffer
+				suggestedName := a.aiPane.GetSuggestedFilename()
+				a.editorPane.SetContentUnsaved(selectedCode, suggestedName)
+
+				// Switch to editor pane
+				a.activePane = types.EditorPaneType
+				a.editorPane.focused = true
+				a.aiPane.focused = false
+
+				if suggestedName != "" {
+					a.statusMessage = "Code loaded (suggested name: " + suggestedName + ") — Ctrl+S to save"
+				} else {
+					a.statusMessage = "Code loaded — Ctrl+S to save with a filename"
+				}
 			}
 		} else {
 			a.statusMessage = "No code block selected"
@@ -718,11 +728,33 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+s":
 			// Save file in editor
 			if a.activePane == types.EditorPaneType {
-				err := a.editorPane.SaveFile()
-				if err != nil {
-					a.statusMessage = "Error saving: " + err.Error()
+				if a.editorPane.currentFile == nil && a.editorPane.GetContent() != "" {
+					// No file yet — check for AI-suggested name
+					suggested := a.editorPane.GetSuggestedName()
+					if suggested != "" {
+						// Use the suggested name directly
+						filePath := suggested
+						err := a.fileManager.CreateFile(filePath, a.editorPane.GetContent())
+						if err != nil {
+							a.statusMessage = "Error creating file: " + err.Error()
+						} else {
+							a.editorPane.LoadFile(filePath)
+							a.statusMessage = "Saved as " + filePath
+						}
+					} else {
+						// No suggestion — prompt for filename
+						a.pendingCodeInsert = a.editorPane.GetContent()
+						a.showFilePrompt = true
+						a.filePromptBuffer = ""
+						a.statusMessage = "Enter filename to save"
+					}
 				} else {
-					a.statusMessage = "File saved"
+					err := a.editorPane.SaveFile()
+					if err != nil {
+						a.statusMessage = "Error saving: " + err.Error()
+					} else {
+						a.statusMessage = "File saved"
+					}
 				}
 			}
 			return a, nil
@@ -738,10 +770,56 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "ctrl+r":
-			// Execute script (placeholder for now)
-			// TODO: Implement script execution
-			a.statusMessage = "Script execution not yet implemented"
-			return a, nil
+			// Execute current script from editor
+			if a.editorPane.currentFile == nil {
+				a.statusMessage = "No file open to run"
+				return a, nil
+			}
+
+			filePath := a.editorPane.currentFile.Filepath
+			fileType := a.editorPane.currentFile.FileType
+
+			// Auto-save before running
+			if a.editorPane.HasUnsavedChanges() {
+				if err := a.editorPane.SaveFile(); err != nil {
+					a.statusMessage = "Save failed: " + err.Error()
+					return a, nil
+				}
+			}
+
+			// Build the execution command based on file type
+			var runCmd string
+			switch fileType {
+			case "bash":
+				runCmd = "bash " + filePath
+			case "powershell":
+				if runtime.GOOS == "windows" {
+					runCmd = "powershell -NoProfile -File " + filePath
+				} else {
+					runCmd = "pwsh -NoProfile -File " + filePath
+				}
+			case "python":
+				runCmd = "python3 " + filePath
+			default:
+				// Default: try to run as shell script
+				if runtime.GOOS == "windows" {
+					runCmd = "powershell -NoProfile -File " + filePath
+				} else {
+					runCmd = "sh " + filePath
+				}
+			}
+
+			// Switch focus to AI pane and run
+			a.activePane = types.AIPaneType
+			a.editorPane.focused = false
+			a.aiPane.focused = true
+
+			fileName := filepath.Base(filePath)
+			a.statusMessage = "Running " + fileName + "..."
+
+			cmd := a.aiPane.RunScript(runCmd, fileName)
+			cmds = append(cmds, cmd)
+			return a, tea.Batch(cmds...)
 
 		case "ctrl+enter":
 			// Send AI message with context from editor

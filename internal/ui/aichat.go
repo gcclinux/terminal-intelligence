@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"regexp"
+	"runtime"
 	"strings"
 	"time"
 
@@ -72,6 +74,7 @@ type AIChatPane struct {
 	terminalInput    string              // Current input line being typed in terminal mode
 	aiAvailable      bool                // Whether the AI service is reachable
 	aiChecked        bool                // Whether the availability check has completed
+	suggestedFile    string              // Filename suggested by AI for the current code block
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -335,10 +338,15 @@ func (a *AIChatPane) AddFixRequest(message string, filePath string) {
 // Updates the codeBlocks slice for use in copy mode.
 func (a *AIChatPane) extractCodeBlocks() {
 	a.codeBlocks = []string{}
+	a.suggestedFile = ""
 	for _, msg := range a.messages {
 		if msg.Role == "assistant" {
 			blocks := extractCodeFromMarkdown(msg.Content)
 			a.codeBlocks = append(a.codeBlocks, blocks...)
+			// Extract suggested filename from the last assistant message that has one
+			if name := extractSuggestedFilename(msg.Content); name != "" {
+				a.suggestedFile = name
+			}
 		}
 	}
 }
@@ -376,6 +384,18 @@ func extractCodeFromMarkdown(content string) []string {
 	}
 
 	return blocks
+}
+// extractSuggestedFilename looks for a filename suggested by the AI in the response text.
+// It searches for patterns like `filename.sh`, "filename.sh", or filename.ext near
+// keywords like "save it to", "save it as", "for example", "called", "named".
+var suggestedFileRe = regexp.MustCompile("(?i)(?:save (?:it )?(?:to|as)(?: a file)?|for example|called|named|create(?: a file)?)[^`\"]{0,30}[`\"]([\\w/-]+\\.[a-z0-9]{1,4})[`\"]")
+
+func extractSuggestedFilename(content string) string {
+	matches := suggestedFileRe.FindStringSubmatch(content)
+	if len(matches) >= 2 {
+		return matches[1]
+	}
+	return ""
 }
 
 // ClearHistory clears the conversation history.
@@ -451,7 +471,12 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 	outChan := make(chan tea.Msg)
 
 	go func() {
-		cmd := exec.Command("sh", "-c", script)
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("powershell", "-NoProfile", "-Command", script)
+		} else {
+			cmd = exec.Command("sh", "-c", script)
+		}
 
 		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
@@ -1560,6 +1585,10 @@ func (a *AIChatPane) GetCodeBlocks() []string {
 func (a *AIChatPane) GetSelectedCodeBlock() string {
 	return a.lastSelectedCode
 }
+// GetSuggestedFilename returns the filename the AI suggested for the code, if any.
+func (a *AIChatPane) GetSuggestedFilename() string {
+	return a.suggestedFile
+}
 
 // IsInViewMode returns whether the pane is in view mode.
 // Used by App to show appropriate status bar instructions.
@@ -1584,6 +1613,28 @@ func (a *AIChatPane) GetLastAssistantResponse() string {
 		}
 	}
 	return ""
+}
+
+// RunScript enters terminal mode and executes the given command, streaming
+// output into the AI chat pane. Returns a tea.Cmd to start the execution.
+func (a *AIChatPane) RunScript(command string, label string) tea.Cmd {
+	if a.cmdRunning {
+		return nil
+	}
+
+	a.viewMode = true
+	a.terminalMode = true
+	a.cmdRunning = true
+	a.copyMode = false
+
+	a.terminalOutput = []string{
+		"▶ Running: " + label,
+		"> " + command,
+		"",
+	}
+	a.viewModeScroll = 0
+
+	return a.executeCommand(command)
 }
 
 // EnterConfigMode enters the configuration editor mode.

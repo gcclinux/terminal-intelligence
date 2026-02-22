@@ -804,6 +804,14 @@ func (f *AgenticCodeFixer) detectChangeLocations(originalLines, modifiedLines []
 // This is a simple heuristic that looks for common function declaration patterns
 // Supports bash, shell, powershell function declarations
 func (f *AgenticCodeFixer) detectNearbyFunction(lines []string, lineNum int) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	// Clamp lineNum to valid range
+	if lineNum >= len(lines) {
+		lineNum = len(lines) - 1
+	}
+
 	// Search backwards from the change location to find a function declaration
 	// Look up to 20 lines back
 	searchStart := lineNum - 20

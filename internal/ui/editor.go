@@ -48,6 +48,7 @@ type EditorPane struct {
 	undoStack       []editorSnapshot         // Undo history
 	redoStack       []editorSnapshot         // Redo history
 	pendingAltD     bool                     // Waiting for second key after Alt+D
+	suggestedName   string                   // AI-suggested filename for unsaved buffer
 }
 
 // editorSnapshot stores editor state for undo/redo
@@ -214,6 +215,20 @@ func (e *EditorPane) SetContent(content string) {
 	if e.currentFile != nil {
 		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
+}
+// SetContentUnsaved loads content into the editor without an associated file.
+// If suggestedName is provided, it will be used as the default filename on save.
+func (e *EditorPane) SetContentUnsaved(content string, suggestedName string) {
+	e.content = content
+	e.originalContent = ""
+	e.cursorLine = 0
+	e.cursorCol = 0
+	e.scrollOffset = 0
+	e.currentFile = nil
+	e.diffMarkers = make(map[int]string)
+	e.suggestedName = suggestedName
+	e.undoStack = nil
+	e.redoStack = nil
 }
 
 // HasUnsavedChanges checks if editor has unsaved changes.
@@ -957,4 +972,8 @@ func (e *EditorPane) GetCurrentFile() *FileContext {
 		FileContent: e.content, // Use current editor content (includes unsaved changes)
 		FileType:    e.currentFile.FileType,
 	}
+}
+// GetSuggestedName returns the AI-suggested filename, if any.
+func (e *EditorPane) GetSuggestedName() string {
+	return e.suggestedName
 }
