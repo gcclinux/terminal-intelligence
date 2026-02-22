@@ -70,6 +70,8 @@ type AIChatPane struct {
 	terminalOutput   []string            // Output lines from terminal execution
 	stdinWriter      io.WriteCloser      // Stdin pipe for sending input to running command
 	terminalInput    string              // Current input line being typed in terminal mode
+	aiAvailable      bool                // Whether the AI service is reachable
+	aiChecked        bool                // Whether the availability check has completed
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -114,6 +116,11 @@ type TerminalDoneMsg struct {
 	Err      error
 }
 
+// AIAvailabilityMsg is sent when the AI availability check completes.
+type AIAvailabilityMsg struct {
+	Available bool
+}
+
 // NewAIChatPane creates a new AI chat pane.
 // Initializes an empty conversation with the specified AI client and model.
 // Defaults to "llama2" model if none is specified.
@@ -142,6 +149,53 @@ func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPan
 		streaming:      false,
 		activeArea:     0, // 0: Input, 1: Response
 		terminalOutput: []string{},
+	}
+}
+
+// CheckAIAvailability returns a tea.Cmd that checks if the configured AI
+// provider and model are reachable, sending an AIAvailabilityMsg with the result.
+func (a *AIChatPane) CheckAIAvailability() tea.Cmd {
+	client := a.aiClient
+	model := a.model
+	provider := a.provider
+
+	return func() tea.Msg {
+		if client == nil {
+			return AIAvailabilityMsg{Available: false}
+		}
+
+		// Check if the service is reachable
+		available, err := client.IsAvailable()
+		if err != nil || !available {
+			return AIAvailabilityMsg{Available: false}
+		}
+
+		// For Ollama, also verify the specific model exists
+		if provider == "ollama" {
+			models, err := client.ListModels()
+			if err != nil {
+				return AIAvailabilityMsg{Available: false}
+			}
+			found := false
+			for _, m := range models {
+				if m == model || m == model+":latest" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				return AIAvailabilityMsg{Available: false}
+			}
+		}
+
+		// For Gemini, try listing models to confirm API key + model access
+		if provider == "gemini" {
+			// IsAvailable already checks API key; do a lightweight generate test
+			// by just confirming the client was created with a key.
+			// The real validation happens on first request.
+		}
+
+		return AIAvailabilityMsg{Available: true}
 	}
 }
 
@@ -382,6 +436,10 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 		if a.terminalMode {
 			a.viewModeScroll = len(a.terminalOutput)
 		}
+		return nil
+	case AIAvailabilityMsg:
+		a.aiChecked = true
+		a.aiAvailable = msg.Available
 		return nil
 	}
 
@@ -983,13 +1041,13 @@ func (a *AIChatPane) View() string {
 
 	// Calculate heights - input gets 2 lines (prompt + status), rest for responses
 	maxInputLines := 3
-	inputWidth := a.width - 8 // Account for border, padding, and "TI> " prefix
+	inputWidth := a.width - 15 // Account for border, padding, and "ai-assist> " prefix
 	if inputWidth < 10 {
 		inputWidth = 10
 	}
 
 	// Calculate how many lines the input will actually take
-	promptText := "TI> " + a.inputBuffer
+	promptText := "ai-assist> " + a.inputBuffer
 	if a.focused && a.activeArea == 0 {
 		promptText += "█" // Cursor
 	}
@@ -1011,13 +1069,23 @@ func (a *AIChatPane) View() string {
 
 	// Build status line to show inside the input box
 	statusText := "⚡ " + a.provider + "/" + a.model
-	if a.streaming {
-		statusText += "  ⏳ generating..."
-	} else {
+	if !a.aiChecked {
+		statusText += "  … checking"
+	} else if a.aiAvailable {
 		statusText += "  ✓ ready"
+	} else {
+		statusText += "  ✗ No AI Accessible"
+	}
+	statusColor := "15" // white
+	if a.aiChecked && !a.aiAvailable {
+		statusColor = "196" // red for unavailable
+	}
+	if a.streaming {
+		statusText = "⚡ " + a.provider + "/" + a.model + "  ⏳ generating..."
+		statusColor = "15"
 	}
 	statusLine := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("240")).
+		Foreground(lipgloss.Color(statusColor)).
 		Render(statusText)
 
 	// Add status as an extra line inside the input box

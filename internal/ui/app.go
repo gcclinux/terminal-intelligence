@@ -149,7 +149,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 // This is part of the Bubble Tea Model interface.
 // Currently returns nil as no initial commands are needed.
 func (a *App) Init() tea.Cmd {
-	return nil
+	return a.aiPane.CheckAIAvailability()
 }
 
 // Update handles messages and updates application state.
@@ -253,8 +253,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update agentic fixer
 		a.agenticFixer = agentic.NewAgenticCodeFixer(a.aiClient, a.config.DefaultModel)
 
+		// Re-check AI availability with the new config
+		a.aiPane.aiChecked = false
+		a.aiPane.aiAvailable = false
+
 		a.statusMessage = "Configuration saved successfully to " + configPath
-		return a, nil
+		return a, a.aiPane.CheckAIAvailability()
 
 	case InsertCodeMsg:
 		// Handle code insertion from AI pane
@@ -351,7 +355,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
-	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg:
+	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg:
 		cmd := a.aiPane.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
