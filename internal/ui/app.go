@@ -65,6 +65,7 @@ type App struct {
 	showFilePicker       bool                      // Whether file picker dialog is showing
 	showBackupPicker     bool                      // Whether backup picker dialog is showing
 	showHelp             bool                      // Whether help dialog is showing
+	showEditorHelp       bool                      // Whether editor shortcuts dialog is showing
 	filePromptBuffer     string                    // Buffer for file name input
 	fileList             []string                  // List of files for picker
 	backupList           []string                  // List of backups for picker
@@ -370,6 +371,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Handle editor shortcuts dialog
+		if a.showEditorHelp {
+			switch msg.String() {
+			case "esc", "ctrl+e", "q":
+				a.showEditorHelp = false
+			}
+			return a, nil
+		}
+
 		// Handle file picker dialog
 		if a.showFilePicker {
 			switch msg.String() {
@@ -640,6 +650,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showHelp = !a.showHelp
 			return a, nil
 
+		case "ctrl+e":
+			// Toggle editor shortcuts help
+			a.showEditorHelp = !a.showEditorHelp
+			return a, nil
+
 		case "ctrl+a":
 			// Insert entire last assistant response into editor file
 			response := a.aiPane.GetLastAssistantResponse()
@@ -900,6 +915,11 @@ func (a *App) View() string {
 	// Show help dialog if needed
 	if a.showHelp {
 		return a.renderHelpDialog()
+	}
+
+	// Show editor shortcuts dialog if needed
+	if a.showEditorHelp {
+		return a.renderEditorHelpDialog()
 	}
 
 	// Show backup picker dialog if needed

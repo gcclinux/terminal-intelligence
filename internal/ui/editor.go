@@ -45,6 +45,16 @@ type EditorPane struct {
 	height          int                      // Pane height
 	focused         bool                     // Whether this pane is focused
 	diffMarkers     map[int]string           // Tracks red/green line styling for diffs
+	undoStack       []editorSnapshot         // Undo history
+	redoStack       []editorSnapshot         // Redo history
+	pendingAltD     bool                     // Waiting for second key after Alt+D
+}
+
+// editorSnapshot stores editor state for undo/redo
+type editorSnapshot struct {
+	content    string
+	cursorLine int
+	cursorCol  int
 }
 
 // NewEditorPane creates a new editor pane.
@@ -271,8 +281,68 @@ func (e *EditorPane) Update(msg tea.Msg) tea.Cmd {
 //   - tea.Cmd: Command to execute (currently always nil)
 func (e *EditorPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	lines := strings.Split(e.content, "\n")
+	keyStr := msg.String()
 
-	switch msg.String() {
+	// Handle pending Alt+D sequence (waiting for d/w/number)
+	if e.pendingAltD {
+		e.pendingAltD = false
+		// Accept both plain and alt+ variants (user may still hold Alt)
+		switch {
+		case keyStr == "d" || keyStr == "D" || keyStr == "alt+d" || keyStr == "alt+D":
+			e.deleteLine()
+			return nil
+		case keyStr == "w" || keyStr == "W" || keyStr == "alt+w" || keyStr == "alt+W":
+			e.deleteWord()
+			return nil
+		case keyStr >= "1" && keyStr <= "9":
+			n := int(keyStr[0] - '0')
+			e.deleteLines(n)
+			return nil
+		default:
+			if len(keyStr) == 5 && keyStr[:4] == "alt+" && keyStr[4] >= '1' && keyStr[4] <= '9' {
+				n := int(keyStr[4] - '0')
+				e.deleteLines(n)
+				return nil
+			}
+			return nil
+		}
+	}
+
+	switch keyStr {
+	case "alt+d":
+		// Start Alt+D sequence, wait for next key
+		e.pendingAltD = true
+		return nil
+	// Direct Alt shortcuts for delete (single press alternatives)
+	case "alt+l":
+		// Alt+L = delete line (single-key alternative to Alt+D,D)
+		e.deleteLine()
+		return nil
+	case "alt+w":
+		// Alt+W = delete word (single-key alternative to Alt+D,W)
+		e.deleteWord()
+		return nil
+	case "alt+u":
+		e.undo()
+		return nil
+	case "alt+r":
+		e.redo()
+		return nil
+	case "alt+g":
+		// Go to end of file
+		e.cursorLine = len(lines) - 1
+		if e.cursorLine < 0 {
+			e.cursorLine = 0
+		}
+		e.cursorCol = len(lines[e.cursorLine])
+		e.adjustScroll()
+		return nil
+	case "alt+h":
+		// Go to top of file
+		e.cursorLine = 0
+		e.cursorCol = 0
+		e.adjustScroll()
+		return nil
 	case "up":
 		if e.cursorLine > 0 {
 			e.cursorLine--
@@ -363,6 +433,7 @@ func (e *EditorPane) shiftMarkers(fromLine int, amount int) {
 // Parameters:
 //   - char: The character to insert
 func (e *EditorPane) insertChar(char string) {
+	e.saveSnapshot()
 	lines := strings.Split(e.content, "\n")
 	if e.cursorLine >= len(lines) {
 		lines = append(lines, "")
@@ -388,6 +459,7 @@ func (e *EditorPane) insertChar(char string) {
 // Moves cursor to the beginning of the new line.
 // Updates the modified flag and adjusts scroll.
 func (e *EditorPane) insertNewline() {
+	e.saveSnapshot()
 	lines := strings.Split(e.content, "\n")
 	if e.cursorLine >= len(lines) {
 		lines = append(lines, "")
@@ -427,6 +499,7 @@ func (e *EditorPane) insertNewline() {
 // If at the beginning of a line, merges with the previous line.
 // Updates the modified flag and adjusts scroll.
 func (e *EditorPane) deleteChar() {
+	e.saveSnapshot()
 	lines := strings.Split(e.content, "\n")
 	if e.cursorLine >= len(lines) {
 		return
@@ -468,6 +541,7 @@ func (e *EditorPane) deleteChar() {
 // If at the end of a line, merges with the next line.
 // Updates the modified flag.
 func (e *EditorPane) deleteNextChar() {
+	e.saveSnapshot()
 	lines := strings.Split(e.content, "\n")
 	if e.cursorLine >= len(lines) {
 		return
@@ -495,6 +569,152 @@ func (e *EditorPane) deleteNextChar() {
 		// cursorCol stays the same (at the join point)
 	}
 
+	e.content = strings.Join(lines, "\n")
+	if e.currentFile != nil {
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
+	}
+}
+
+// saveSnapshot pushes current state onto the undo stack and clears redo
+func (e *EditorPane) saveSnapshot() {
+	e.undoStack = append(e.undoStack, editorSnapshot{
+		content:    e.content,
+		cursorLine: e.cursorLine,
+		cursorCol:  e.cursorCol,
+	})
+	e.redoStack = nil
+}
+
+// undo restores the previous editor state
+func (e *EditorPane) undo() {
+	if len(e.undoStack) == 0 {
+		return
+	}
+	// Push current state to redo
+	e.redoStack = append(e.redoStack, editorSnapshot{
+		content:    e.content,
+		cursorLine: e.cursorLine,
+		cursorCol:  e.cursorCol,
+	})
+	snap := e.undoStack[len(e.undoStack)-1]
+	e.undoStack = e.undoStack[:len(e.undoStack)-1]
+	e.content = snap.content
+	e.cursorLine = snap.cursorLine
+	e.cursorCol = snap.cursorCol
+	if e.currentFile != nil {
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
+	}
+	e.adjustScroll()
+}
+
+// redo restores the next editor state
+func (e *EditorPane) redo() {
+	if len(e.redoStack) == 0 {
+		return
+	}
+	e.undoStack = append(e.undoStack, editorSnapshot{
+		content:    e.content,
+		cursorLine: e.cursorLine,
+		cursorCol:  e.cursorCol,
+	})
+	snap := e.redoStack[len(e.redoStack)-1]
+	e.redoStack = e.redoStack[:len(e.redoStack)-1]
+	e.content = snap.content
+	e.cursorLine = snap.cursorLine
+	e.cursorCol = snap.cursorCol
+	if e.currentFile != nil {
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
+	}
+	e.adjustScroll()
+}
+
+// deleteLine deletes the current line
+func (e *EditorPane) deleteLine() {
+	e.saveSnapshot()
+	lines := strings.Split(e.content, "\n")
+	if len(lines) == 0 {
+		return
+	}
+	if e.cursorLine >= len(lines) {
+		e.cursorLine = len(lines) - 1
+	}
+	lines = append(lines[:e.cursorLine], lines[e.cursorLine+1:]...)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	e.content = strings.Join(lines, "\n")
+	if e.cursorLine >= len(lines) {
+		e.cursorLine = len(lines) - 1
+	}
+	if e.cursorLine < 0 {
+		e.cursorLine = 0
+	}
+	if e.cursorCol > len(strings.Split(e.content, "\n")[e.cursorLine]) {
+		e.cursorCol = len(strings.Split(e.content, "\n")[e.cursorLine])
+	}
+	if e.currentFile != nil {
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
+	}
+	e.adjustScroll()
+}
+
+// deleteLines deletes n lines starting from the current line
+func (e *EditorPane) deleteLines(n int) {
+	e.saveSnapshot()
+	lines := strings.Split(e.content, "\n")
+	if len(lines) == 0 || n <= 0 {
+		return
+	}
+	if e.cursorLine >= len(lines) {
+		e.cursorLine = len(lines) - 1
+	}
+	end := e.cursorLine + n
+	if end > len(lines) {
+		end = len(lines)
+	}
+	lines = append(lines[:e.cursorLine], lines[end:]...)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	e.content = strings.Join(lines, "\n")
+	if e.cursorLine >= len(lines) {
+		e.cursorLine = len(lines) - 1
+	}
+	if e.cursorLine < 0 {
+		e.cursorLine = 0
+	}
+	curLines := strings.Split(e.content, "\n")
+	if e.cursorCol > len(curLines[e.cursorLine]) {
+		e.cursorCol = len(curLines[e.cursorLine])
+	}
+	if e.currentFile != nil {
+		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
+	}
+	e.adjustScroll()
+}
+
+// deleteWord deletes from cursor to end of current word (or next word boundary)
+func (e *EditorPane) deleteWord() {
+	e.saveSnapshot()
+	lines := strings.Split(e.content, "\n")
+	if e.cursorLine >= len(lines) {
+		return
+	}
+	line := lines[e.cursorLine]
+	if e.cursorCol >= len(line) {
+		return
+	}
+	// Find end of word: skip non-spaces, then skip spaces
+	pos := e.cursorCol
+	// Skip current word characters
+	for pos < len(line) && line[pos] != ' ' && line[pos] != '\t' {
+		pos++
+	}
+	// Skip trailing whitespace
+	for pos < len(line) && (line[pos] == ' ' || line[pos] == '\t') {
+		pos++
+	}
+	lines[e.cursorLine] = line[:e.cursorCol] + line[pos:]
 	e.content = strings.Join(lines, "\n")
 	if e.currentFile != nil {
 		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
