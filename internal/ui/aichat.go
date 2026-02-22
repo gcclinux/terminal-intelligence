@@ -3,6 +3,7 @@ package ui
 import (
 	"bufio"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -67,6 +68,8 @@ type AIChatPane struct {
 	terminalMode     bool                // Whether terminal execution is active
 	cmdRunning       bool                // Whether the command is currently running
 	terminalOutput   []string            // Output lines from terminal execution
+	stdinWriter      io.WriteCloser      // Stdin pipe for sending input to running command
+	terminalInput    string              // Current input line being typed in terminal mode
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -301,7 +304,8 @@ func extractCodeFromMarkdown(content string) []string {
 	inBlock := false
 
 	for _, line := range lines {
-		if strings.HasPrefix(line, "```") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
 			if inBlock {
 				// End of code block
 				blocks = append(blocks, currentBlock.String())
@@ -367,6 +371,8 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 		}
 	case TerminalDoneMsg:
 		a.cmdRunning = false
+		a.stdinWriter = nil
+		a.terminalInput = ""
 		a.terminalOutput = append(a.terminalOutput, "")
 		if msg.Err != nil {
 			a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process failed: %v]", msg.Err))
@@ -389,8 +395,11 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 	go func() {
 		cmd := exec.Command("sh", "-c", script)
 
+		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
+
+		a.stdinWriter = stdin
 
 		if err := cmd.Start(); err != nil {
 			outChan <- TerminalDoneMsg{Err: err}
@@ -434,6 +443,7 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 				exitCode = -1
 			}
 		}
+		a.stdinWriter = nil
 		outChan <- TerminalDoneMsg{ExitCode: exitCode, Err: err}
 	}()
 
@@ -570,6 +580,57 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	// Handle view mode (viewing full code block)
 	if a.viewMode {
 		keyStr := msg.String()
+
+		// When a command is running in terminal mode, forward input to the process
+		if a.terminalMode && a.cmdRunning && a.stdinWriter != nil {
+			switch keyStr {
+			case "esc":
+				// Esc always exits — close stdin and let the process finish
+				a.stdinWriter.Close()
+				return nil
+			case "enter":
+				// Send the current input line + newline to the process
+				line := a.terminalInput + "\n"
+				a.terminalOutput = append(a.terminalOutput, "> "+a.terminalInput)
+				a.terminalInput = ""
+				a.viewModeScroll = len(a.terminalOutput)
+				a.stdinWriter.Write([]byte(line))
+				return nil
+			case "backspace":
+				if len(a.terminalInput) > 0 {
+					a.terminalInput = a.terminalInput[:len(a.terminalInput)-1]
+				}
+				return nil
+			case "up", "down", "pgup", "pgdown":
+				// Allow scrolling even while command is running
+				switch keyStr {
+				case "up":
+					if a.viewModeScroll > 0 {
+						a.viewModeScroll--
+					}
+				case "down":
+					a.viewModeScroll++
+				case "pgup":
+					a.viewModeScroll -= 10
+					if a.viewModeScroll < 0 {
+						a.viewModeScroll = 0
+					}
+				case "pgdown":
+					a.viewModeScroll += 10
+				}
+				return nil
+			default:
+				// Accumulate printable characters into the terminal input buffer
+				if len(keyStr) == 1 {
+					r := []rune(keyStr)[0]
+					if r >= 32 {
+						a.terminalInput += keyStr
+					}
+				}
+				return nil
+			}
+		}
+
 		switch keyStr {
 		case "esc", "q", "2":
 			a.viewMode = false
@@ -920,7 +981,7 @@ func (a *AIChatPane) View() string {
 		return a.renderCopyMode()
 	}
 
-	// Calculate heights - input gets fixed 3 lines max, rest for responses
+	// Calculate heights - input gets 2 lines (prompt + status), rest for responses
 	maxInputLines := 3
 	inputWidth := a.width - 8 // Account for border, padding, and "TI> " prefix
 	if inputWidth < 10 {
@@ -947,6 +1008,21 @@ func (a *AIChatPane) View() string {
 	if actualInputLines < 1 {
 		actualInputLines = 1
 	}
+
+	// Build status line to show inside the input box
+	statusText := "⚡ " + a.provider + "/" + a.model
+	if a.streaming {
+		statusText += "  ⏳ generating..."
+	} else {
+		statusText += "  ✓ ready"
+	}
+	statusLine := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("240")).
+		Render(statusText)
+
+	// Add status as an extra line inside the input box
+	wrappedLines = append(wrappedLines, statusLine)
+	actualInputLines++
 
 	// Input height includes border (2 lines) + content lines
 	inputHeight := actualInputLines + 2
@@ -1120,7 +1196,7 @@ func (a *AIChatPane) View() string {
 		borderStyle.Render(responseContent),
 	)
 
-	// Join input and response areas vertically (removed instruction bar)
+	// Join input and response areas vertically
 	return lipgloss.JoinVertical(lipgloss.Left, inputArea, responseArea)
 }
 
@@ -1196,15 +1272,29 @@ func (a *AIChatPane) renderViewMode() string {
 
 	if a.terminalMode {
 		displayLinesSource = a.terminalOutput
-		instructions = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("238")).
-			Bold(true).
-			MarginTop(1).
-			MarginBottom(1).
-			Padding(0, 1).
-			Width(a.width - 4).
-			Render(" ⚙  [2/Esc] Return to Code  |  [↑↓/PgUp/PgDn] Scroll Terminal ")
+		// Show input prompt at the bottom if command is still running
+		if a.cmdRunning {
+			displayLinesSource = append(append([]string{}, a.terminalOutput...), "$ "+a.terminalInput+"█")
+			instructions = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("238")).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(1).
+				Padding(0, 1).
+				Width(a.width - 4).
+				Render(" ⚙  [Enter] Send Input  |  [Esc] Close Stdin  |  [↑↓/PgUp/PgDn] Scroll ")
+		} else {
+			instructions = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("238")).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(1).
+				Padding(0, 1).
+				Width(a.width - 4).
+				Render(" ⚙  [2/Esc] Return to Code  |  [↑↓/PgUp/PgDn] Scroll Terminal ")
+		}
 	} else {
 		displayLinesSource = strings.Split(codeBlock, "\n")
 		instructions = lipgloss.NewStyle().
