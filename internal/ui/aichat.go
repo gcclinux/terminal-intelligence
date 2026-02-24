@@ -385,6 +385,7 @@ func extractCodeFromMarkdown(content string) []string {
 
 	return blocks
 }
+
 // extractSuggestedFilename looks for a filename suggested by the AI in the response text.
 // It searches for patterns like `filename.sh`, "filename.sh", or filename.ext near
 // keywords like "save it to", "save it as", "for example", "called", "named".
@@ -1341,15 +1342,26 @@ func (a *AIChatPane) renderCopyMode() string {
 // Returns:
 //   - string: Rendered view mode display
 func (a *AIChatPane) renderViewMode() string {
-	if a.selectedBlock >= len(a.codeBlocks) {
+	// In terminal mode, we don't need a code block
+	if a.terminalMode {
+		// Skip code block validation for terminal mode
+	} else if a.selectedBlock >= len(a.codeBlocks) {
 		return "Error: Invalid code block"
 	}
 
-	codeBlock := a.codeBlocks[a.selectedBlock]
+	var codeBlock string
+	if !a.terminalMode {
+		codeBlock = a.codeBlocks[a.selectedBlock]
+	}
 
 	// Create title - match the width of the normal AI response title bar
-	title := "Code Block " + string(rune('0'+a.selectedBlock+1)) + " of " +
-		string(rune('0'+len(a.codeBlocks)))
+	var title string
+	if a.terminalMode {
+		title = "Terminal Output"
+	} else {
+		title = "Code Block " + string(rune('0'+a.selectedBlock+1)) + " of " +
+			string(rune('0'+len(a.codeBlocks)))
+	}
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -1585,6 +1597,7 @@ func (a *AIChatPane) GetCodeBlocks() []string {
 func (a *AIChatPane) GetSelectedCodeBlock() string {
 	return a.lastSelectedCode
 }
+
 // GetSuggestedFilename returns the filename the AI suggested for the code, if any.
 func (a *AIChatPane) GetSuggestedFilename() string {
 	return a.suggestedFile
@@ -1622,6 +1635,8 @@ func (a *AIChatPane) RunScript(command string, label string) tea.Cmd {
 		return nil
 	}
 
+	// Don't require code blocks for direct file execution
+	// This allows running scripts opened with Ctrl+O
 	a.viewMode = true
 	a.terminalMode = true
 	a.cmdRunning = true
