@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
@@ -76,6 +78,7 @@ type AIChatPane struct {
 	aiAvailable      bool                // Whether the AI service is reachable
 	aiChecked        bool                // Whether the availability check has completed
 	suggestedFile    string              // Filename suggested by AI for the current code block
+	workingDir       string              // Directory from which to execute commands
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -169,6 +172,7 @@ func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPan
 	if model == "" {
 		model = "llama2"
 	}
+	cwd, _ := os.Getwd()
 	return &AIChatPane{
 		messages:       []types.ChatMessage{},
 		inputBuffer:    "",
@@ -182,6 +186,14 @@ func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPan
 		streaming:      false,
 		activeArea:     0, // 0: Input, 1: Response
 		terminalOutput: []string{},
+		workingDir:     cwd,
+	}
+}
+
+// SetWorkingDir sets the directory from which commands should execute.
+func (a *AIChatPane) SetWorkingDir(dir string) {
+	if dir != "" {
+		a.workingDir = dir
 	}
 }
 
@@ -502,11 +514,45 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 	outChan := make(chan tea.Msg)
 
 	go func() {
+		// Preliminary Go initialization check
+		if strings.Contains(script, "go get") || strings.Contains(script, "go run") || strings.Contains(script, "go build") || strings.Contains(script, "go test") || strings.Contains(script, "go install") {
+			cmdCheck := exec.Command("go", "env", "GOMOD")
+			if a.workingDir != "" {
+				cmdCheck.Dir = a.workingDir
+			}
+			out, err := cmdCheck.Output()
+			outStr := strings.TrimSpace(string(out))
+			if err != nil || outStr == "" || outStr == os.DevNull || outStr == "NUL" {
+				baseName := filepath.Base(a.workingDir)
+				if baseName == "." || baseName == "" || baseName == string(filepath.Separator) {
+					baseName = "ti-project"
+				}
+				baseName = strings.ReplaceAll(baseName, " ", "-")
+				baseName = strings.ToLower(baseName)
+
+				initCmd := exec.Command("go", "mod", "init", baseName)
+				if a.workingDir != "" {
+					initCmd.Dir = a.workingDir
+				}
+				initCmd.Run()
+
+				tidyCmd := exec.Command("go", "mod", "tidy")
+				if a.workingDir != "" {
+					tidyCmd.Dir = a.workingDir
+				}
+				tidyCmd.Run()
+			}
+		}
+
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
 			cmd = exec.Command("powershell", "-NoProfile", "-Command", script)
 		} else {
 			cmd = exec.Command("sh", "-c", script)
+		}
+
+		if a.workingDir != "" {
+			cmd.Dir = a.workingDir
 		}
 
 		stdin, _ := cmd.StdinPipe()

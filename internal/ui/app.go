@@ -16,6 +16,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -505,6 +506,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.statusMessage = "Error opening file: " + err.Error()
 					} else {
 						a.statusMessage = "Successfully opened: " + selectedFile
+						a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 						// Switch to editor pane after opening file
 						a.activePane = types.EditorPaneType
 						a.editorPane.focused = true
@@ -586,6 +588,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						} else {
 							a.editorPane.LoadFile(a.filePromptBuffer)
 							a.statusMessage = "Created: " + a.filePromptBuffer
+							a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 
 							// Insert pending code if any
 							if a.pendingCodeInsert != "" {
@@ -601,6 +604,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					} else {
 						a.statusMessage = "Opened: " + a.filePromptBuffer
+						a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 
 						// Insert pending code if any
 						if a.pendingCodeInsert != "" {
@@ -851,9 +855,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								a.statusMessage = "File created but load failed: " + err.Error()
 							} else {
 								a.statusMessage = "Saved as " + filePath
+								a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 
 								// Check if language runtime is installed for this file type
 								fileType := a.editorPane.currentFile.FileType
+								if fileType == "go" {
+									a.ensureGoModule(filepath.Dir(a.editorPane.currentFile.Filepath))
+								}
 								if fileType == "go" || fileType == "python" {
 									return a, func() tea.Msg {
 										langName := "Go"
@@ -884,7 +892,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 						// Check if language runtime is installed for this file type
 						if a.editorPane.currentFile != nil {
+							a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 							fileType := a.editorPane.currentFile.FileType
+							if fileType == "go" {
+								a.ensureGoModule(filepath.Dir(a.editorPane.currentFile.Filepath))
+							}
 							if fileType == "go" || fileType == "python" {
 								return a, func() tea.Msg {
 									langName := "Go"
@@ -1604,4 +1616,30 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 
 		return AgenticFixResultMsg{Result: result}
 	}
+}
+
+// ensureGoModule checks if a go.mod exists in the given directory and runs
+// go mod init and go mod tidy if it doesn't, to automate Go project creation.
+func (a *App) ensureGoModule(dir string) {
+	go func() {
+		cmdCheck := exec.Command("go", "env", "GOMOD")
+		cmdCheck.Dir = dir
+		out, err := cmdCheck.Output()
+		outStr := strings.TrimSpace(string(out))
+		if err != nil || outStr == "" || outStr == os.DevNull || outStr == "NUL" {
+			baseName := filepath.Base(dir)
+			if baseName == "." || baseName == "" || baseName == string(filepath.Separator) {
+				baseName = "ti-project"
+			}
+			baseName = strings.ReplaceAll(baseName, " ", "-")
+			baseName = strings.ToLower(baseName)
+			initCmd := exec.Command("go", "mod", "init", baseName)
+			initCmd.Dir = dir
+			initCmd.Run()
+		}
+
+		tidyCmd := exec.Command("go", "mod", "tidy")
+		tidyCmd.Dir = dir
+		tidyCmd.Run()
+	}()
 }

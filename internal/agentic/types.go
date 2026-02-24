@@ -12,10 +12,10 @@
 //
 // Error Handling Strategy:
 // The package follows a transactional approach to error handling:
-//   1. Create backup before applying changes
-//   2. Apply changes to temporary copy
-//   3. Validate the result
-//   4. Commit or rollback based on validation
+//  1. Create backup before applying changes
+//  2. Apply changes to temporary copy
+//  3. Validate the result
+//  4. Commit or rollback based on validation
 //
 // This ensures that original content is always preserved on error, maintaining system consistency.
 package agentic
@@ -30,7 +30,7 @@ import (
 // - UserMessage must not be empty
 // - FileContent may be empty (for new files)
 // - FilePath must be a valid path string
-// - FileType must be one of: "bash", "shell", "powershell", "markdown", "python"
+// - FileType must be one of: "bash", "shell", "powershell", "markdown", "python", "go"
 // - PreviewMode indicates whether to show changes without applying them
 type FixRequest struct {
 	UserMessage string
@@ -45,23 +45,24 @@ func (fr *FixRequest) Validate() error {
 	if strings.TrimSpace(fr.UserMessage) == "" {
 		return fmt.Errorf("UserMessage must not be empty")
 	}
-	
+
 	if fr.FilePath == "" {
 		return fmt.Errorf("FilePath must not be empty")
 	}
-	
+
 	validFileTypes := map[string]bool{
 		"bash":       true,
 		"shell":      true,
 		"powershell": true,
 		"markdown":   true,
 		"python":     true,
+		"go":         true,
 	}
-	
+
 	if !validFileTypes[fr.FileType] {
-		return fmt.Errorf("FileType must be one of: bash, shell, powershell, markdown, python; got: %s", fr.FileType)
+		return fmt.Errorf("FileType must be one of: bash, shell, powershell, markdown, python, go; got: %s", fr.FileType)
 	}
-	
+
 	return nil
 }
 
@@ -101,7 +102,7 @@ func (fr *FixResult) Validate() error {
 			return fmt.Errorf("ModifiedContent should be empty when Success is false")
 		}
 	}
-	
+
 	return nil
 }
 
@@ -121,7 +122,7 @@ func (cb *CodeBlock) Validate() error {
 	if strings.TrimSpace(cb.Code) == "" {
 		return fmt.Errorf("Code must not be empty")
 	}
-	
+
 	return nil
 }
 
@@ -141,7 +142,7 @@ func (fdr *FixDetectionResult) Validate() error {
 	if fdr.Confidence < 0.0 || fdr.Confidence > 1.0 {
 		return fmt.Errorf("Confidence must be between 0.0 and 1.0; got: %f", fdr.Confidence)
 	}
-	
+
 	if fdr.IsFixRequest {
 		if fdr.Confidence < 0.7 {
 			return fmt.Errorf("Confidence should be >= 0.7 when IsFixRequest is true; got: %f", fdr.Confidence)
@@ -150,6 +151,6 @@ func (fdr *FixDetectionResult) Validate() error {
 			return fmt.Errorf("Keywords should contain at least one keyword when IsFixRequest is true")
 		}
 	}
-	
+
 	return nil
 }

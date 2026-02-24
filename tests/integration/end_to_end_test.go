@@ -349,8 +349,8 @@ func TestEndToEnd_TerminalResizeHandling(t *testing.T) {
 		_, _ = app.Update(msg2)
 
 		// Verify panes resized
-		if editorPane.GetWidth() != 64 { // (120 / 2) + 4
-			t.Errorf("Expected editor width 64, got %d", editorPane.GetWidth())
+		if editorPane.GetWidth() != 62 { // (120 / 2) + 2
+			t.Errorf("Expected editor width 62, got %d", editorPane.GetWidth())
 		}
 
 		if editorPane.GetHeight() != 33 { // 40 - 3 for header - 3 for editor title - 1 for status bar

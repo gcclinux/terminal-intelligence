@@ -10,7 +10,7 @@ import (
 // FixParser extracts and validates code fixes from AI responses.
 // It provides methods to parse markdown-formatted AI responses, identify which code blocks
 // represent actual fixes (versus examples or explanations), and validate syntax for different
-// file types (bash, shell, powershell, markdown, python).
+// file types (bash, shell, powershell, markdown, python, go).
 //
 // The parser uses heuristics to distinguish fix blocks from explanatory code:
 //   - Blocks matching the target file type are prioritized
@@ -22,6 +22,7 @@ import (
 //   - PowerShell: Checks for unmatched quotes, brackets, and try/catch/finally blocks
 //   - Markdown: Checks for unmatched code block markers
 //   - Python: Checks for unmatched quotes, brackets, and basic indentation consistency
+//   - Go: Checks for unmatched brackets and basic go file structure
 type FixParser struct {
 	debug bool // Enable debug logging
 }
@@ -59,32 +60,32 @@ func (p *FixParser) logError(format string, args ...interface{}) {
 // Returns a slice of CodeBlock structs
 func (p *FixParser) ExtractCodeBlocks(response string) []CodeBlock {
 	p.logDebug("Extracting code blocks from response (length: %d chars)", len(response))
-	
+
 	var blocks []CodeBlock
-	
+
 	// Regular expression to match markdown code blocks
 	// Matches: ```optional-language\ncode content\n```
 	codeBlockRegex := regexp.MustCompile("(?s)```([a-zA-Z0-9_+-]*)\n(.*?)```")
-	
+
 	matches := codeBlockRegex.FindAllStringSubmatch(response, -1)
 	p.logDebug("Found %d potential code blocks", len(matches))
-	
+
 	for i, match := range matches {
 		if len(match) >= 3 {
 			language := strings.TrimSpace(match[1])
 			code := match[2]
-			
+
 			// Skip empty code blocks
 			if strings.TrimSpace(code) == "" {
 				p.logDebug("Skipping empty code block %d", i+1)
 				continue
 			}
-			
+
 			// Remove trailing newline if present
 			code = strings.TrimRight(code, "\n")
-			
+
 			p.logDebug("Extracted code block %d: language=%s, size=%d bytes", i+1, language, len(code))
-			
+
 			blocks = append(blocks, CodeBlock{
 				Language: language,
 				Code:     code,
@@ -92,10 +93,11 @@ func (p *FixParser) ExtractCodeBlocks(response string) []CodeBlock {
 			})
 		}
 	}
-	
+
 	p.logDebug("Extracted %d valid code blocks", len(blocks))
 	return blocks
 }
+
 // IdentifyFixBlocks determines which code blocks represent fixes versus explanations
 // It analyzes the blocks and their context to distinguish actual code fixes from examples
 // or explanatory code snippets. Returns only the blocks that should be applied as fixes.
@@ -107,7 +109,7 @@ func (p *FixParser) ExtractCodeBlocks(response string) []CodeBlock {
 // - Blocks with generic/unspecified language may be fixes if they match file content patterns
 func (p *FixParser) IdentifyFixBlocks(blocks []CodeBlock, fileType string) []CodeBlock {
 	p.logDebug("Identifying fix blocks for file type: %s (total blocks: %d)", fileType, len(blocks))
-	
+
 	if len(blocks) == 0 {
 		return []CodeBlock{}
 	}
@@ -130,12 +132,12 @@ func (p *FixParser) IdentifyFixBlocks(blocks []CodeBlock, fileType string) []Cod
 			lineCount := countLines(block.Code)
 			block.IsWhole = lineCount > 3
 
-			p.logDebug("Block %d matches file type (language: %s, lines: %d, isWhole: %v)", 
+			p.logDebug("Block %d matches file type (language: %s, lines: %d, isWhole: %v)",
 				i+1, block.Language, lineCount, block.IsWhole)
-			
+
 			fixBlocks = append(fixBlocks, block)
 		} else {
-			p.logDebug("Block %d does not match file type (language: %s vs %s)", 
+			p.logDebug("Block %d does not match file type (language: %s vs %s)",
 				i+1, normalizedLang, normalizedFileType)
 		}
 	}
@@ -176,6 +178,8 @@ func normalizeFileType(fileType string) string {
 		return "markdown"
 	case "python", "py":
 		return "python"
+	case "go":
+		return "go"
 	default:
 		return fileType
 	}
@@ -195,6 +199,8 @@ func normalizeLanguage(language string) string {
 		return "markdown"
 	case "py", "python":
 		return "python"
+	case "go", "golang":
+		return "go"
 	default:
 		return language
 	}
@@ -244,11 +250,11 @@ func countLines(code string) int {
 
 // ValidateFixSyntax performs basic syntax validation on a fix
 // Validates that the code is syntactically appropriate for the file type
-// Supports: bash, shell, powershell, markdown, python
+// Supports: bash, shell, powershell, markdown, python, go
 // Returns an error if validation fails, nil if validation passes
 func (p *FixParser) ValidateFixSyntax(code string, fileType string) error {
 	p.logDebug("Validating syntax for file type: %s (code length: %d bytes)", fileType, len(code))
-	
+
 	if strings.TrimSpace(code) == "" {
 		p.logError("Code is empty")
 		return fmt.Errorf("code cannot be empty")
@@ -269,6 +275,9 @@ func (p *FixParser) ValidateFixSyntax(code string, fileType string) error {
 	case "python":
 		p.logDebug("Performing Python syntax validation")
 		return validatePythonSyntax(code)
+	case "go":
+		p.logDebug("Performing Go syntax validation")
+		return validateGoSyntax(code)
 	default:
 		// For unknown file types, perform minimal validation
 		p.logDebug("Unknown file type, skipping syntax validation")
@@ -279,7 +288,7 @@ func (p *FixParser) ValidateFixSyntax(code string, fileType string) error {
 // validateBashSyntax performs basic bash/shell syntax validation
 func validateBashSyntax(code string) error {
 	// Basic checks for common bash syntax errors
-	
+
 	// Check for unmatched quotes
 	if err := checkUnmatchedQuotes(code); err != nil {
 		return fmt.Errorf("bash syntax error: %w", err)
@@ -301,7 +310,7 @@ func validateBashSyntax(code string) error {
 // validatePowerShellSyntax performs basic PowerShell syntax validation
 func validatePowerShellSyntax(code string) error {
 	// Basic checks for common PowerShell syntax errors
-	
+
 	// Check for unmatched quotes
 	if err := checkUnmatchedQuotes(code); err != nil {
 		return fmt.Errorf("powershell syntax error: %w", err)
@@ -323,7 +332,7 @@ func validatePowerShellSyntax(code string) error {
 // validateMarkdownSyntax performs basic markdown syntax validation
 func validateMarkdownSyntax(code string) error {
 	// Basic checks for markdown syntax
-	
+
 	// Check for unmatched code block markers
 	backtickCount := strings.Count(code, "```")
 	if backtickCount%2 != 0 {
@@ -394,17 +403,17 @@ func checkUnmatchedBrackets(code string) error {
 	}
 
 	lines := strings.Split(code, "\n")
-	
+
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Check if we're in a case statement pattern (ends with ')')
 		// Case patterns look like: pattern) command;;
 		if strings.Contains(trimmed, ";;") {
 			// This line likely contains case patterns, skip bracket checking for ')' in patterns
 			inCasePattern = true
 		}
-		
+
 		for _, ch := range line {
 			// Skip characters inside quotes
 			if escaped {
@@ -446,7 +455,7 @@ func checkUnmatchedBrackets(code string) error {
 					}
 					continue
 				}
-				
+
 				if len(stack) == 0 {
 					return fmt.Errorf("unmatched closing bracket: %c", ch)
 				}
@@ -460,7 +469,7 @@ func checkUnmatchedBrackets(code string) error {
 				}
 			}
 		}
-		
+
 		// Reset case pattern flag at end of line
 		inCasePattern = false
 	}
@@ -476,7 +485,7 @@ func checkUnmatchedBrackets(code string) error {
 func checkBashControlStructures(code string) error {
 	// Count control structure keywords
 	lines := strings.Split(code, "\n")
-	
+
 	ifCount := 0
 	fiCount := 0
 	doCount := 0
@@ -486,7 +495,7 @@ func checkBashControlStructures(code string) error {
 
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Skip comments
 		if strings.HasPrefix(trimmed, "#") {
 			continue
@@ -533,16 +542,16 @@ func checkBashControlStructures(code string) error {
 func checkPowerShellControlStructures(code string) error {
 	// PowerShell uses braces for control structures, which are already checked
 	// by checkUnmatchedBrackets. We can add more specific checks here if needed.
-	
+
 	// For now, we'll just ensure basic structure
 	// PowerShell is case-insensitive, so we normalize to lowercase
 	lowerCode := strings.ToLower(code)
-	
+
 	// Check for incomplete try/catch/finally blocks
 	tryCount := strings.Count(lowerCode, "try")
 	catchCount := strings.Count(lowerCode, "catch")
 	finallyCount := strings.Count(lowerCode, "finally")
-	
+
 	// Try blocks should have at least one catch or finally
 	if tryCount > 0 && (catchCount+finallyCount) == 0 {
 		return fmt.Errorf("try block without catch or finally")
@@ -554,7 +563,7 @@ func checkPowerShellControlStructures(code string) error {
 // validatePythonSyntax performs basic Python syntax validation
 func validatePythonSyntax(code string) error {
 	// Basic checks for common Python syntax errors
-	
+
 	// Check for unmatched quotes
 	if err := checkUnmatchedQuotes(code); err != nil {
 		return fmt.Errorf("python syntax error: %w", err)
@@ -576,29 +585,29 @@ func validatePythonSyntax(code string) error {
 // checkPythonIndentation performs basic Python indentation validation
 func checkPythonIndentation(code string) error {
 	lines := strings.Split(code, "\n")
-	
+
 	// Track if we're expecting an indented block
 	expectIndent := false
 	prevIndent := 0
-	
+
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		
+
 		// Skip empty lines and comments
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		
+
 		// Calculate indentation level
 		indent := len(line) - len(strings.TrimLeft(line, " \t"))
-		
+
 		// Check if line ends with colon (starts a block)
 		if strings.HasSuffix(trimmed, ":") {
 			expectIndent = true
 			prevIndent = indent
 			continue
 		}
-		
+
 		// If we expected indentation, check that it increased
 		if expectIndent {
 			if indent <= prevIndent {
@@ -606,9 +615,24 @@ func checkPythonIndentation(code string) error {
 			}
 			expectIndent = false
 		}
-		
+
 		prevIndent = indent
 	}
-	
+
+	return nil
+}
+
+// validateGoSyntax performs basic Go syntax validation
+func validateGoSyntax(code string) error {
+	// Check for unmatched quotes
+	if err := checkUnmatchedQuotes(code); err != nil {
+		return fmt.Errorf("go syntax error: %w", err)
+	}
+
+	// Check for unmatched brackets/parentheses
+	if err := checkUnmatchedBrackets(code); err != nil {
+		return fmt.Errorf("go syntax error: %w", err)
+	}
+
 	return nil
 }

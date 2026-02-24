@@ -46,6 +46,20 @@ Complete workflow showing editor, AI assistance, and execution in action of the 
 
 ---
 
+### Go Language Support - Code Editing
+Terminal Intelligence now fully supports Go application development. Experience syntax highlighting, robust context-aware agentic fix features, and seamless editing of `.go` files directly in the split-pane interface.
+
+![TI Go Support - Editing](images/ti-supporting-go.png)
+
+---
+
+### Go Language Support - Execution and Testing
+Run and test your Go programs seamlessly within TI using the `Ctrl+R` hotkey. The environment automatically manages background tasks like module initialization (`go mod init`/`go mod tidy`) and executes `go run` or `go test` according to the active file.
+
+![TI Go Support - Running](images/ti-supporting-go-b.png)
+
+---
+
 ## Key Features Demonstrated
 
 - **Split-Window Layout**: Efficient workspace with editor and AI assistant side-by-side
