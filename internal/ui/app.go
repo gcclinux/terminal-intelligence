@@ -28,6 +28,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
 	"github.com/user/terminal-intelligence/internal/gemini"
+	"github.com/user/terminal-intelligence/internal/installer"
 	"github.com/user/terminal-intelligence/internal/ollama"
 	"github.com/user/terminal-intelligence/internal/types"
 )
@@ -51,30 +52,33 @@ import (
 //
 // The App implements the Bubble Tea Model interface (Init, Update, View).
 type App struct {
-	config               *types.AppConfig          // Application configuration
-	editorPane           *EditorPane               // Left pane: code editor
-	aiPane               *AIChatPane               // Right pane: AI chat
-	fileManager          *filemanager.FileManager  // File system operations
-	aiClient             ai.AIClient               // AI service client (Ollama or Gemini)
-	agenticFixer         *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
-	activePane           types.PaneType            // Currently focused pane
-	width                int                       // Terminal width
-	height               int                       // Terminal height
-	ready                bool                      // Whether initial sizing is complete
-	showExitConfirmation bool                      // Whether exit confirmation dialog is showing
-	showFilePrompt       bool                      // Whether file creation prompt is showing
-	showFilePicker       bool                      // Whether file picker dialog is showing
-	showBackupPicker     bool                      // Whether backup picker dialog is showing
-	showHelp             bool                      // Whether help dialog is showing
-	showEditorHelp       bool                      // Whether editor shortcuts dialog is showing
-	filePromptBuffer     string                    // Buffer for file name input
-	fileList             []string                  // List of files for picker
-	backupList           []string                  // List of backups for picker
-	filePickerIndex      int                       // Selected index in file picker
-	forceQuit            bool                      // Whether to quit without save confirmation
-	statusMessage        string                    // Status bar message
-	pendingCodeInsert    string                    // Code waiting to be inserted after file creation
-	buildNumber          string                    // Build number from git commits
+	config                    *types.AppConfig          // Application configuration
+	editorPane                *EditorPane               // Left pane: code editor
+	aiPane                    *AIChatPane               // Right pane: AI chat
+	fileManager               *filemanager.FileManager  // File system operations
+	aiClient                  ai.AIClient               // AI service client (Ollama or Gemini)
+	agenticFixer              *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
+	activePane                types.PaneType            // Currently focused pane
+	width                     int                       // Terminal width
+	height                    int                       // Terminal height
+	ready                     bool                      // Whether initial sizing is complete
+	showExitConfirmation      bool                      // Whether exit confirmation dialog is showing
+	showFilePrompt            bool                      // Whether file creation prompt is showing
+	showFilePicker            bool                      // Whether file picker dialog is showing
+	showBackupPicker          bool                      // Whether backup picker dialog is showing
+	showHelp                  bool                      // Whether help dialog is showing
+	showEditorHelp            bool                      // Whether editor shortcuts dialog is showing
+	showLanguageInstallPrompt bool                      // Whether language install prompt is showing
+	languageToInstall         string                    // Language name for installation prompt
+	fileTypeForInstall        string                    // File type that triggered install check
+	filePromptBuffer          string                    // Buffer for file name input
+	fileList                  []string                  // List of files for picker
+	backupList                []string                  // List of backups for picker
+	filePickerIndex           int                       // Selected index in file picker
+	forceQuit                 bool                      // Whether to quit without save confirmation
+	statusMessage             string                    // Status bar message
+	pendingCodeInsert         string                    // Code waiting to be inserted after file creation
+	buildNumber               string                    // Build number from git commits
 }
 
 // New creates a new application instance with the provided configuration.
@@ -262,6 +266,85 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.statusMessage = "Configuration saved successfully to " + configPath
 		return a, a.aiPane.CheckAIAvailability()
 
+	case LanguageCheckMsg:
+		// Check if the required language runtime is installed
+		langInstaller := installer.NewLanguageInstaller()
+		installed, version := langInstaller.CheckLanguageForFile(msg.FileType)
+
+		if installed {
+			if version != "" {
+				a.statusMessage = fmt.Sprintf("%s is installed: %s", msg.LanguageName, version)
+			}
+			return a, nil
+		}
+
+		// Language not installed, show prompt
+		a.showLanguageInstallPrompt = true
+		a.languageToInstall = msg.LanguageName
+		a.fileTypeForInstall = msg.FileType
+		return a, nil
+
+	case LanguageInstallMsg:
+		// Start installation process
+		a.showLanguageInstallPrompt = false
+		a.statusMessage = fmt.Sprintf("Installing %s...", msg.LanguageName)
+
+		// Show initial message in AI pane immediately
+		initialMsg := fmt.Sprintf("🚀 Starting %s Installation\n\n", msg.LanguageName)
+		initialMsg += "This may take a few minutes. Please wait...\n\n"
+		initialMsg += "Steps:\n"
+		initialMsg += "1. Fetching latest version\n"
+		initialMsg += "2. Detecting system architecture\n"
+		initialMsg += "3. Downloading Go (~140MB)\n"
+		initialMsg += "4. Removing old installation\n"
+		initialMsg += "5. Extracting files (requires sudo)\n"
+		initialMsg += "6. Updating shell configuration\n"
+		initialMsg += "7. Verifying installation\n\n"
+		initialMsg += "Installation in progress..."
+		a.aiPane.DisplayNotification(initialMsg)
+
+		// Run installation in background
+		return a, func() tea.Msg {
+			langInstaller := installer.NewLanguageInstaller()
+
+			var output string
+			var err error
+
+			switch msg.LanguageName {
+			case "Go":
+				output, err = langInstaller.InstallGo()
+			default:
+				err = fmt.Errorf("unsupported language: %s", msg.LanguageName)
+			}
+
+			return LanguageInstallResultMsg{
+				Success: err == nil,
+				Output:  output,
+				Error:   err,
+			}
+		}
+
+	case LanguageInstallResultMsg:
+		// Handle installation result
+		if msg.Success {
+			a.statusMessage = fmt.Sprintf("%s installed successfully!", a.languageToInstall)
+
+			// Display installation output in AI pane
+			notification := fmt.Sprintf("✓ %s Installation Complete\n\n%s", a.languageToInstall, msg.Output)
+			a.aiPane.DisplayNotification(notification)
+		} else {
+			a.statusMessage = fmt.Sprintf("%s installation failed: %s", a.languageToInstall, msg.Error.Error())
+
+			// Display error in AI pane
+			notification := fmt.Sprintf("✗ %s Installation Failed\n\n%s\n\nError: %s",
+				a.languageToInstall, msg.Output, msg.Error.Error())
+			a.aiPane.DisplayNotification(notification)
+		}
+
+		a.languageToInstall = ""
+		a.fileTypeForInstall = ""
+		return a, nil
+
 	case InsertCodeMsg:
 		// Handle code insertion from AI pane
 		selectedCode := a.aiPane.GetSelectedCodeBlock()
@@ -351,10 +434,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.ready = true
 
 		// Account for header (3 lines), editor title bar (3 lines), status bar (1 line)
-		// Give editor pane slightly more width to account for borders
-		editorWidth := (msg.Width / 2) + 4 // Add 2 extra chars to editor
-		aiWidth := (msg.Width / 2) - 1     // Subtract 2 from AI pane
-		paneHeight := msg.Height - 7       // -3 for header, -3 for editor title bar, -1 for status bar
+		paneHeight := msg.Height - 7
+
+		// Width budget:
+		// Editor View() uses Border + Width(w-4) → rendered width = w - 4 (content) + 2 (border) = w - 2
+		// AI pane View() wraps everything in a container with Width(w) → rendered width = w
+		// Total must equal msg.Width: (editorW - 2) + aiW = msg.Width
+		// So: editorW + aiW = msg.Width + 2
+		halfWidth := msg.Width / 2
+		editorWidth := halfWidth + 2           // renders as halfWidth wide
+		aiWidth := msg.Width + 2 - editorWidth // renders as msg.Width - halfWidth wide
 
 		// Update editor pane size
 		a.editorPane.width = editorWidth
@@ -549,6 +638,25 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Handle language install prompt dialog
+		if a.showLanguageInstallPrompt {
+			switch msg.String() {
+			case "y", "Y":
+				// Confirm installation
+				return a, func() tea.Msg {
+					return LanguageInstallMsg{LanguageName: a.languageToInstall}
+				}
+			case "n", "N", "esc":
+				// Cancel installation
+				a.showLanguageInstallPrompt = false
+				a.languageToInstall = ""
+				a.fileTypeForInstall = ""
+				a.statusMessage = "Installation cancelled"
+				return a, nil
+			}
+			return a, nil
+		}
+
 		// Handle exit confirmation dialog
 		if a.showExitConfirmation {
 			switch msg.String() {
@@ -738,8 +846,27 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if err != nil {
 							a.statusMessage = "Error creating file: " + err.Error()
 						} else {
-							a.editorPane.LoadFile(filePath)
-							a.statusMessage = "Saved as " + filePath
+							err = a.editorPane.LoadFile(filePath)
+							if err != nil {
+								a.statusMessage = "File created but load failed: " + err.Error()
+							} else {
+								a.statusMessage = "Saved as " + filePath
+
+								// Check if language runtime is installed for this file type
+								fileType := a.editorPane.currentFile.FileType
+								if fileType == "go" || fileType == "python" {
+									return a, func() tea.Msg {
+										langName := "Go"
+										if fileType == "python" {
+											langName = "Python"
+										}
+										return LanguageCheckMsg{
+											FileType:     fileType,
+											LanguageName: langName,
+										}
+									}
+								}
+							}
 						}
 					} else {
 						// No suggestion — prompt for filename
@@ -754,6 +881,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						a.statusMessage = "Error saving: " + err.Error()
 					} else {
 						a.statusMessage = "File saved"
+
+						// Check if language runtime is installed for this file type
+						if a.editorPane.currentFile != nil {
+							fileType := a.editorPane.currentFile.FileType
+							if fileType == "go" || fileType == "python" {
+								return a, func() tea.Msg {
+									langName := "Go"
+									if fileType == "python" {
+										langName = "Python"
+									}
+									return LanguageCheckMsg{
+										FileType:     fileType,
+										LanguageName: langName,
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -800,6 +944,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			case "python":
 				runCmd = "python3 " + filePath
+			case "go":
+				// For Go files, check if it's a test file or regular file
+				if strings.HasSuffix(filePath, "_test.go") {
+					// Run tests for test files
+					runCmd = "go test -v " + filePath
+				} else {
+					// Run the Go file directly
+					runCmd = "go run " + filePath
+				}
 			default:
 				// Default: try to run as shell script
 				if runtime.GOOS == "windows" {
@@ -1147,9 +1300,55 @@ func (a *App) View() string {
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
 	}
 
-	// Define styles for focused and unfocused panes (removed - panes handle their own borders)
+	// Show language install prompt dialog if needed
+	if a.showLanguageInstallPrompt {
+		promptStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("214")).
+			Padding(1, 2).
+			Width(70).
+			Align(lipgloss.Center)
 
-	// Render panes without additional borders (they have their own)
+		langInstaller := installer.NewLanguageInstaller()
+		installCmd, cmdText, _ := langInstaller.GetGoInstallCommand()
+
+		var promptText string
+		if a.languageToInstall == "Go" {
+			if installCmd == "direct" {
+				// Linux - direct download and install
+				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+				promptText += "Would you like to install Go automatically?\n\n"
+				promptText += "Installation will:\n"
+				promptText += "• Download latest Go from golang.org\n"
+				promptText += "• Extract to /usr/local/go\n"
+				promptText += "• Update your shell configuration\n"
+				promptText += "• Requires sudo password\n\n"
+				promptText += "[Y]es to install / [N]o to cancel"
+			} else if installCmd == "manual" {
+				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+				promptText += "Manual installation required:\n"
+				promptText += cmdText + "\n\n"
+				promptText += "After installation, restart Terminal Intelligence.\n\n"
+				promptText += "[N]o / [Esc] to cancel"
+			} else {
+				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+				promptText += fmt.Sprintf("Would you like to install %s automatically?\n\n", a.languageToInstall)
+				promptText += fmt.Sprintf("Installation command: %s\n\n", cmdText)
+				promptText += "[Y]es to install / [N]o to cancel"
+			}
+		} else {
+			promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+			promptText += fmt.Sprintf("Please install %s manually to run .%s files.\n\n", a.languageToInstall, a.fileTypeForInstall)
+			promptText += "[N]o / [Esc] to close"
+		}
+
+		dialog := promptStyle.Render(promptText)
+
+		// Center the dialog
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
+	// Render panes - each pane handles its own width internally
 	editorContent := a.editorPane.View()
 	aiContent := a.aiPane.View()
 

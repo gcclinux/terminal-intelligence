@@ -46,32 +46,32 @@ func TestApp_PaneSizeCalculations(t *testing.T) {
 			name:                "standard terminal size",
 			terminalWidth:       80,
 			terminalHeight:      24,
-			expectedEditorWidth: 44, // (80 / 2) + 4 (actual behavior with borders)
-			expectedAIWidth:     39, // (80 / 2) - 1 (actual behavior with borders)
+			expectedEditorWidth: 42, // (80 / 2) + 2
+			expectedAIWidth:     40, // 80 + 2 - 42
 			expectedHeight:      17, // 24 - 3 for header - 3 for editor title - 1 for status bar
 		},
 		{
 			name:                "wide terminal",
 			terminalWidth:       200,
 			terminalHeight:      50,
-			expectedEditorWidth: 104, // (200 / 2) + 4
-			expectedAIWidth:     99,  // (200 / 2) - 1
+			expectedEditorWidth: 102, // (200 / 2) + 2
+			expectedAIWidth:     100, // 200 + 2 - 102
 			expectedHeight:      43,  // 50 - 3 for header - 3 for editor title - 1 for status bar
 		},
 		{
 			name:                "narrow terminal",
 			terminalWidth:       40,
 			terminalHeight:      20,
-			expectedEditorWidth: 24, // (40 / 2) + 4
-			expectedAIWidth:     19, // (40 / 2) - 1
+			expectedEditorWidth: 22, // (40 / 2) + 2
+			expectedAIWidth:     20, // 40 + 2 - 22
 			expectedHeight:      13, // 20 - 3 for header - 3 for editor title - 1 for status bar
 		},
 		{
 			name:                "tall terminal",
 			terminalWidth:       80,
 			terminalHeight:      100,
-			expectedEditorWidth: 44, // (80 / 2) + 4
-			expectedAIWidth:     39, // (80 / 2) - 1
+			expectedEditorWidth: 42, // (80 / 2) + 2
+			expectedAIWidth:     40, // 80 + 2 - 42
 			expectedHeight:      93, // 100 - 3 for header - 3 for editor title - 1 for status bar
 		},
 	}
@@ -200,8 +200,8 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 
 		// Verify new sizes
 		editorPane := app.GetEditorPane()
-		if editorPane.GetWidth() != 84 { // (160 / 2) + 4
-			t.Errorf("Editor pane width after resize: expected 84, got %d", editorPane.GetWidth())
+		if editorPane.GetWidth() != 82 { // (160 / 2) + 2
+			t.Errorf("Editor pane width after resize: expected 82, got %d", editorPane.GetWidth())
 		}
 		if editorPane.GetHeight() != 43 { // 50 - 3 for header - 3 for editor title - 1 for status bar
 			t.Errorf("Editor pane height after resize: expected 43, got %d", editorPane.GetHeight())
@@ -221,8 +221,8 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 
 		// Verify new sizes
 		aiPane := app.GetAIPane()
-		if aiPane.GetWidth() != 19 { // (40 / 2) - 1
-			t.Errorf("AI pane width after resize: expected 19, got %d", aiPane.GetWidth())
+		if aiPane.GetWidth() != 20 { // 40 + 2 - 22
+			t.Errorf("AI pane width after resize: expected 20, got %d", aiPane.GetWidth())
 		}
 		if aiPane.GetHeight() != 13 { // 20 - 3 for header - 3 for editor title - 1 for status bar
 			t.Errorf("AI pane height after resize: expected 13, got %d", aiPane.GetHeight())
@@ -246,7 +246,7 @@ func TestApp_TerminalResizeHandling(t *testing.T) {
 			msg := tea.WindowSizeMsg{Width: size.width, Height: size.height}
 			_, _ = app.Update(msg)
 
-			expectedEditorWidth := (size.width / 2) + 4
+			expectedEditorWidth := (size.width / 2) + 2
 
 			editorPane := app.GetEditorPane()
 			if editorPane.GetWidth() != expectedEditorWidth {

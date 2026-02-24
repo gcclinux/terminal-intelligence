@@ -22,8 +22,10 @@ func NewCommandExecutor() *CommandExecutor {
 
 // ExecuteCommand executes a system command
 // Args:
-//   command: string - command string to execute
-//   cwd: string - optional working directory for command execution
+//
+//	command: string - command string to execute
+//	cwd: string - optional working directory for command execution
+//
 // Returns: CommandResult with stdout, stderr, and exit code
 func (ce *CommandExecutor) ExecuteCommand(command string, cwd string) (*types.CommandResult, error) {
 	startTime := time.Now()
@@ -79,7 +81,9 @@ func (ce *CommandExecutor) ExecuteCommand(command string, cwd string) (*types.Co
 
 // ExecuteScript executes a script file with appropriate interpreter
 // Args:
-//   scriptPath: string - path to the script file
+//
+//	scriptPath: string - path to the script file
+//
 // Returns: CommandResult with stdout, stderr, and exit code
 func (ce *CommandExecutor) ExecuteScript(scriptPath string) (*types.CommandResult, error) {
 	// Get the appropriate interpreter
@@ -125,8 +129,10 @@ func (ce *CommandExecutor) ExecuteScript(scriptPath string) (*types.CommandResul
 
 // GetInterpreter determines the appropriate interpreter for a script
 // Args:
-//   scriptPath: string - path to the script file
-// Returns: interpreter command (e.g., "bash", "sh", "powershell")
+//
+//	scriptPath: string - path to the script file
+//
+// Returns: interpreter command (e.g., "bash", "sh", "powershell", "go")
 func (ce *CommandExecutor) GetInterpreter(scriptPath string) string {
 	ext := strings.ToLower(filepath.Ext(scriptPath))
 
@@ -147,6 +153,12 @@ func (ce *CommandExecutor) GetInterpreter(scriptPath string) string {
 		}
 		// On Unix systems, use pwsh (PowerShell Core) if available
 		return "pwsh"
+	case ".py":
+		// Python script
+		return "python3"
+	case ".go":
+		// Go source file - use "go run" for execution
+		return "go"
 	default:
 		// Unsupported script type
 		return ""

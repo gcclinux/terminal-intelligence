@@ -216,6 +216,7 @@ func (e *EditorPane) SetContent(content string) {
 		e.currentFile.IsModified = (e.content != e.originalContent) || len(e.diffMarkers) > 0
 	}
 }
+
 // SetContentUnsaved loads content into the editor without an associated file.
 // If suggestedName is provided, it will be used as the default filename on save.
 func (e *EditorPane) SetContentUnsaved(content string, suggestedName string) {
@@ -849,11 +850,12 @@ func (e *EditorPane) View() string {
 
 	content := strings.Join(renderedLines, "\n")
 
-	// Use strict Height to enforce size
+	// Use strict Height and MaxWidth to enforce size
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 0).
 		Width(e.width - 4).
+		MaxWidth(e.width - 2). // Fix: total outer width is e.width - 2
 		Height(e.height - 2)
 
 	if e.focused {
@@ -915,6 +917,9 @@ func determineFileType(filepath string) string {
 	if strings.HasSuffix(filepath, ".py") {
 		return "python"
 	}
+	if strings.HasSuffix(filepath, ".go") {
+		return "go"
+	}
 	return "shell"
 }
 
@@ -973,6 +978,7 @@ func (e *EditorPane) GetCurrentFile() *FileContext {
 		FileType:    e.currentFile.FileType,
 	}
 }
+
 // GetSuggestedName returns the AI-suggested filename, if any.
 func (e *EditorPane) GetSuggestedName() string {
 	return e.suggestedName

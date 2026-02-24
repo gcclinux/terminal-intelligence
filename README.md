@@ -10,11 +10,14 @@ A lightweight CLI-based IDE with integrated AI assistance through Ollama. Featur
 ## Features
 
 - **Split-Window Interface**: Vertical split with editor on the left and AI assistant on the right
-- **Code Editor**: Basic text editing with line numbers for bash, shell, PowerShell, and markdown files
+- **Multi-Language Support**: Edit and run Bash, PowerShell, Python, Go, and Markdown files
+- **Auto-Install Detection**: Automatically detects missing language runtimes and offers to install them
+- **Code Editor**: Syntax-aware text editing with line numbers and file type detection
 - **AI Integration**: Context-aware AI assistance powered by Ollama or Gemini
 - **Agentic Code Fixing**: AI autonomously reads, analyzes, and fixes code directly in the editor
 - **File Management**: Create, open, save, and delete files
-- **Command Execution**: Run system commands and execute scripts
+- **Command Execution**: Run scripts and programs with Ctrl+R (auto-detects file type)
+- **Go Development**: Full support for running Go programs and tests
 - **Keyboard Shortcuts**: Efficient keyboard-driven workflow
 - **Session Management**: Unsaved changes confirmation on exit
 - **Cross-Platform**: Runs on Linux, Windows, and macOS
@@ -173,8 +176,9 @@ Agentic code fixing works with:
 - Bash scripts (`.sh`, `.bash`)
 - Shell scripts (`.sh`)
 - PowerShell scripts (`.ps1`)
-- Markdown documents (`.md`)
 - Python scripts (`.py`)
+- Go source files (`.go`)
+- Markdown documents (`.md`)
 
 ## Requirements
 
@@ -253,6 +257,11 @@ You can edit this file to customize your settings. The application will load it 
 ## Usage
 
 [Introduction](./docs/USAGE.md)
+
+### Language-Specific Guides
+
+- [Go Language Support](./docs/GO_SUPPORT.md) - Complete guide for Go development in TI
+- [Automatic Language Installation](./docs/AUTO_INSTALL.md) - Auto-detect and install missing runtimes
 
 ```
 

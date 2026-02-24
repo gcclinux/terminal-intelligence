@@ -60,6 +60,7 @@ type AIChatPane struct {
 	lastKeyPressed   string              // Last key pressed (for debugging)
 	activeArea       int                 // 0: Input, 1: Response
 	viewModeScroll   int                 // Scroll offset for code block view mode
+	viewModeScrollX  int                 // Horizontal scroll offset for code block view mode
 	configMode       bool                // Whether in config editor mode
 	configFields     []string            // Config field names
 	configValues     []string            // Config field values
@@ -122,6 +123,35 @@ type TerminalDoneMsg struct {
 // AIAvailabilityMsg is sent when the AI availability check completes.
 type AIAvailabilityMsg struct {
 	Available bool
+}
+
+// LanguageCheckMsg is sent when a language runtime check is needed.
+type LanguageCheckMsg struct {
+	FileType     string // The file type being checked (e.g., "go", "python")
+	LanguageName string // Human-readable language name
+}
+
+// LanguageInstallPromptMsg is sent to show the installation prompt dialog.
+type LanguageInstallPromptMsg struct {
+	LanguageName string // Language to install (e.g., "Go", "Python")
+	FileType     string // File type that triggered the check
+}
+
+// LanguageInstallMsg is sent to start the installation process.
+type LanguageInstallMsg struct {
+	LanguageName string // Language to install
+}
+
+// LanguageInstallProgressMsg is sent during installation to show progress.
+type LanguageInstallProgressMsg struct {
+	Message string // Progress message to display
+}
+
+// LanguageInstallResultMsg is sent when installation completes.
+type LanguageInstallResultMsg struct {
+	Success bool
+	Output  string
+	Error   error
 }
 
 // NewAIChatPane creates a new AI chat pane.
@@ -761,9 +791,19 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 			a.viewModeScroll += 10
 		case "home":
 			a.viewModeScroll = 0
+			a.viewModeScrollX = 0
 		case "end":
 			// Will be clamped in renderViewMode
 			a.viewModeScroll = 999999
+		case "left", "h":
+			if a.viewModeScrollX > 0 {
+				a.viewModeScrollX -= 5
+				if a.viewModeScrollX < 0 {
+					a.viewModeScrollX = 0
+				}
+			}
+		case "right", "l":
+			a.viewModeScrollX += 5
 		default:
 			// Store the key pressed for debugging
 			a.lastKeyPressed = keyStr
@@ -880,7 +920,8 @@ func (a *AIChatPane) getMaxScroll() int {
 	}
 
 	// Calculate visible lines the same way as in View()
-	inputHeight := 3
+	// Input area: 1 prompt line + 1 status line = 2 content lines + 2 border = 4
+	inputHeight := 4
 	responseHeight := a.height - inputHeight
 	if responseHeight < 5 {
 		responseHeight = 5
@@ -913,19 +954,26 @@ func (a *AIChatPane) scrollToBottom() {
 // Returns:
 //   - int: Number of lines the message will occupy
 func (a *AIChatPane) countMessageLines(msg types.ChatMessage) int {
-	contentWidth := a.width - 8 // Account for padding and borders and scrollbar
-	if contentWidth < 10 {
-		contentWidth = 10
+	contentWidth := a.width - 10
+	if contentWidth < 20 {
+		contentWidth = 20
 	}
 
-	lines := 2 // Header line + blank line
-	contentLines := strings.Split(msg.Content, "\n")
+	lines := 2 // Header line + blank line after message
+
+	// Pre-process tabs which cause visual sizing bugs
+	msgContent := strings.ReplaceAll(msg.Content, "\t", "    ")
+	contentLines := strings.Split(msgContent, "\n")
+
 	for _, line := range contentLines {
 		if len(line) == 0 {
-			lines++
-		} else {
-			lines += (len(line) + contentWidth - 1) / contentWidth
+			lines += 1
+			continue
 		}
+
+		// Each content line can wrap to multiple lines
+		wrapped := wrapTextFast(line, contentWidth)
+		lines += len(wrapped)
 	}
 
 	return lines
@@ -990,10 +1038,9 @@ func (a *AIChatPane) renderMessage(msg types.ChatMessage) []string {
 
 	lines = append(lines, header)
 
-	// Content lines with wrapping
-	contentWidth := a.width - 8 // Account for padding, borders and scrollbar
-	if contentWidth < 10 {
-		contentWidth = 10
+	contentWidth := a.width - 10
+	if contentWidth < 20 {
+		contentWidth = 20
 	}
 
 	// Apply distinct styling to notification content
@@ -1002,27 +1049,22 @@ func (a *AIChatPane) renderMessage(msg types.ChatMessage) []string {
 		contentStyle = contentStyle.Foreground(lipgloss.Color("34")) // Cyan for notification content
 	}
 
-	contentLines := strings.Split(msg.Content, "\n")
+	msgContent := strings.ReplaceAll(msg.Content, "\t", "    ")
+	contentLines := strings.Split(msgContent, "\n")
+
 	for _, line := range contentLines {
 		if len(line) == 0 {
 			lines = append(lines, "")
-		} else {
-			// Wrap long lines
-			for len(line) > 0 {
-				if len(line) <= contentWidth {
-					if msg.IsNotification {
-						lines = append(lines, contentStyle.Render(line))
-					} else {
-						lines = append(lines, line)
-					}
-					break
-				}
-				if msg.IsNotification {
-					lines = append(lines, contentStyle.Render(line[:contentWidth]))
-				} else {
-					lines = append(lines, line[:contentWidth])
-				}
-				line = line[contentWidth:]
+			continue
+		}
+
+		// Wrap long lines to prevent them from hiding or breaking layout
+		wrapped := wrapTextFast(line, contentWidth)
+		for _, wline := range wrapped {
+			if msg.IsNotification {
+				lines = append(lines, contentStyle.Render(wline))
+			} else {
+				lines = append(lines, wline)
 			}
 		}
 	}
@@ -1126,11 +1168,12 @@ func (a *AIChatPane) View() string {
 		responseHeight = 5
 	}
 
-	// Render input area with border
+	// Render input area with border and STRICT width enforcement
 	inputStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1).
 		Width(a.width - 4).
+		MaxWidth(a.width).       // Fix: total outer width is a.width
 		Height(actualInputLines) // Exact height for content
 
 	if a.focused && a.activeArea == 0 {
@@ -1202,8 +1245,8 @@ func (a *AIChatPane) View() string {
 		}
 	}
 
-	// Add padding and scrollbar to each line
-	contentWidth := a.width - 8 // Content width used in renderMessage
+	// Content width must match renderMessage() — see comment there for derivation
+	contentWidth := a.width - 10
 
 	// Apply scrollbar to existing lines and fill empty lines
 	finalLines := make([]string, 0, visibleLines)
@@ -1222,6 +1265,19 @@ func (a *AIChatPane) View() string {
 		if i < len(renderedLines) {
 			line := renderedLines[i]
 			lineWidth := lipgloss.Width(line)
+
+			// CRITICAL: Truncate line if it exceeds contentWidth
+			if lineWidth > contentWidth {
+				// We use wrapTextFast to get strictly bounded slices visually
+				// Usually this won't be hit because renderMessage already wraps,
+				// but as a fallback it prevents layout crashes.
+				wrapped := wrapTextFast(line, contentWidth)
+				if len(wrapped) > 0 {
+					line = wrapped[0]
+				}
+				lineWidth = lipgloss.Width(line)
+			}
+
 			paddingNeed := contentWidth - lineWidth
 			if paddingNeed < 0 {
 				paddingNeed = 0
@@ -1233,10 +1289,6 @@ func (a *AIChatPane) View() string {
 			finalLines = append(finalLines, strings.Repeat(" ", contentWidth)+" "+scrollChar)
 		}
 	}
-
-	renderedLines = finalLines
-
-	responseContent := strings.Join(renderedLines, "\n")
 
 	// Add title bar for responses
 	title := "AI Responses"
@@ -1269,14 +1321,16 @@ func (a *AIChatPane) View() string {
 			Background(lipgloss.Color("235"))
 	}
 
-	// AI Responses [Gemini] | Ctrl+Y: Code | ↑↓: Scroll | Ctrl+T: New Chat titlebar
-	titleBar := titleStyle.Width(a.width - 4).MarginLeft(1).Render(title)
+	// Title bar: no border, just background. MarginLeft(1) adds 1 to total.
+	// Response border renders at a.width total. Title should match: Width + margin = a.width
+	titleBar := titleStyle.Width(a.width - 5).MaxWidth(a.width - 1).MarginLeft(1).Render(title)
 
-	// Create border style for responses
+	// Create border style for responses with STRICT width enforcement
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		Padding(0, 1).
 		Width(a.width - 4).
+		MaxWidth(a.width). // Fix: total outer width is a.width
 		Height(responseHeight - 3)
 
 	if a.focused && a.activeArea == 1 {
@@ -1285,13 +1339,22 @@ func (a *AIChatPane) View() string {
 		borderStyle = borderStyle.BorderForeground(lipgloss.Color("240"))
 	}
 
+	responseContent := strings.Join(finalLines, "\n")
+
 	responseArea := lipgloss.JoinVertical(lipgloss.Left,
 		titleBar,
 		borderStyle.Render(responseContent),
 	)
 
-	// Join input and response areas vertically
-	return lipgloss.JoinVertical(lipgloss.Left, inputArea, responseArea)
+	// CRITICAL: Wrap entire pane in strict width and height container
+	paneContainer := lipgloss.NewStyle().
+		Width(a.width).
+		MaxWidth(a.width).
+		Height(a.height).
+		MaxHeight(a.height).
+		Render(lipgloss.JoinVertical(lipgloss.Left, inputArea, responseArea))
+
+	return paneContainer
 }
 
 // renderCopyMode renders the copy mode dialog.
@@ -1327,7 +1390,13 @@ func (a *AIChatPane) renderCopyMode() string {
 		Padding(1, 2).
 		Width(a.width - 8)
 
-	return dialogStyle.Render(content.String())
+	result := dialogStyle.Render(content.String())
+
+	// Wrap in strict container to match pane dimensions
+	return lipgloss.NewStyle().
+		Width(a.width).MaxWidth(a.width).
+		Height(a.height).MaxHeight(a.height).
+		Render(result)
 }
 
 // renderViewMode renders the full code block view constrained to pane height.
@@ -1368,7 +1437,7 @@ func (a *AIChatPane) renderViewMode() string {
 		Foreground(lipgloss.Color("15")).
 		Background(lipgloss.Color("62")).
 		Padding(0, 1).
-		Width(a.width - 3) // Match the normal title bar width
+		Width(a.width - 4) // Match the code border total width
 
 	titleBar := titleStyle.Render(title)
 
@@ -1410,7 +1479,7 @@ func (a *AIChatPane) renderViewMode() string {
 			MarginBottom(1).
 			Padding(0, 1).
 			Width(a.width - 4).
-			Render(" ⚡ [0] Execute CMD  |  [1/Ctrl+P] Insert  |  [2/Esc] Return  |  [↑↓] Scroll ")
+			Render(" ⚡ [0] Execute  |  [1/Ctrl+P] Insert  |  [Esc] Return  |  [↑↓/←→] Scroll ")
 	}
 
 	// Calculate available height for code content
@@ -1478,8 +1547,30 @@ func (a *AIChatPane) renderViewMode() string {
 		var line string
 		if lineIdx < totalLines {
 			line = displayLinesSource[lineIdx]
-			if len(line) > contentWidth {
-				line = line[:contentWidth-3] + "..."
+
+			// Replace tabs for reliable visual scrolling
+			line = strings.ReplaceAll(line, "\t", "    ")
+
+			runes := []rune(line)
+
+			// Apply horizontal scroll
+			if a.viewModeScrollX > len(runes) {
+				line = ""
+			} else if a.viewModeScrollX > 0 {
+				line = string(runes[a.viewModeScrollX:])
+				runes = []rune(line)
+			}
+
+			// Try to truncate accurately based on visual width
+			if lipgloss.Width(line) > contentWidth {
+				cutAt := contentWidth
+				if cutAt > len(runes) {
+					cutAt = len(runes)
+				}
+				for cutAt > 0 && lipgloss.Width(string(runes[:cutAt])) > contentWidth {
+					cutAt--
+				}
+				line = string(runes[:cutAt])
 			}
 		}
 
@@ -1510,15 +1601,22 @@ func (a *AIChatPane) renderViewMode() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(0, 1).
-		Width(a.width - 4). // Match the normal pane width
+		Width(a.width - 4).
+		MaxWidth(a.width). // Cap total rendered width
 		Height(codeAreaHeight).
 		Foreground(lipgloss.Color("15"))
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	result := lipgloss.JoinVertical(lipgloss.Left,
 		titleBar,
 		instructions,
 		codeStyle.Render(codeContent),
 	)
+
+	// Wrap in strict container to match pane dimensions
+	return lipgloss.NewStyle().
+		Width(a.width).MaxWidth(a.width).
+		Height(a.height).MaxHeight(a.height).
+		Render(result)
 }
 
 // formatInt converts an integer to a string without fmt.Sprintf.
@@ -1772,11 +1870,17 @@ func (a *AIChatPane) renderConfigMode() string {
 		Height(contentHeight).
 		Foreground(lipgloss.Color("15"))
 
-	return lipgloss.JoinVertical(lipgloss.Left,
+	result := lipgloss.JoinVertical(lipgloss.Left,
 		titleBar,
 		instructions,
 		configStyle.Render(configContent),
 	)
+
+	// Wrap in strict container to match pane dimensions
+	return lipgloss.NewStyle().
+		Width(a.width).MaxWidth(a.width).
+		Height(a.height).MaxHeight(a.height).
+		Render(result)
 }
 
 // wrapText wraps text to fit within the specified width.
@@ -1815,6 +1919,56 @@ func wrapText(text string, width int) []string {
 
 	if len(lines) == 0 {
 		lines = []string{""}
+	}
+
+	return lines
+}
+
+// wrapTextFast quickly wraps text into lines of maximum width.
+// Optimized for mostly ASCII text.
+func wrapTextFast(text string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+
+	runes := []rune(text)
+
+	// Quick path block: Check string width vs byte length
+	if len(runes) <= width {
+		// Verify there are no exceptionally wide characters hiding
+		if lipgloss.Width(text) <= width {
+			return []string{text}
+		}
+	}
+
+	var lines []string
+	var currentLine []rune
+	currentWidth := 0
+
+	for _, r := range runes {
+		w := lipgloss.Width(string(r))
+		if currentWidth+w > width {
+			if len(currentLine) > 0 {
+				lines = append(lines, string(currentLine))
+				currentLine = []rune{r}
+				currentWidth = w
+			} else {
+				// Single rune alone exceeds width
+				lines = append(lines, string(r))
+				currentWidth = 0
+			}
+		} else {
+			currentLine = append(currentLine, r)
+			currentWidth += w
+		}
+	}
+
+	if len(currentLine) > 0 {
+		lines = append(lines, string(currentLine))
+	}
+
+	if len(lines) == 0 {
+		return []string{""}
 	}
 
 	return lines
