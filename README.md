@@ -15,6 +15,7 @@ A lightweight CLI-based IDE with integrated AI assistance through Ollama. Featur
 - **Code Editor**: Syntax-aware text editing with line numbers and file type detection
 - **AI Integration**: Context-aware AI assistance powered by Ollama or Gemini
 - **Agentic Code Fixing**: AI autonomously reads, analyzes, and fixes code directly in the editor
+- **Chat History Management**: Save and reload complete AI conversations with Ctrl+A and Ctrl+L
 - **File Management**: Create, open, save, and delete files
 - **Command Execution**: Run scripts and programs with Ctrl+R (auto-detects file type)
 - **Go Development**: Full support for running Go programs and tests
@@ -273,6 +274,10 @@ You can edit this file to customize your settings. The application will load it 
 | `Ctrl+S` | Save current file |
 | `Ctrl+R` | Execute current script |
 | `Ctrl+Enter` | Send message to AI |
+| `Ctrl+Y` | List code blocks from AI response (Execute/Insert/Return) |
+| `Ctrl+A` | Save full chat history to .ti/ folder |
+| `Ctrl+L` | Load saved chat from .ti/ folder |
+| `Ctrl+T` | Clear chat / New chat |
 | `Ctrl+H` | Show help dialog with all shortcuts |
 | `Ctrl+C` or `Ctrl+Q` | Quit application |
 

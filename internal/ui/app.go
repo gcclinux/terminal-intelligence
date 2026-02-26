@@ -20,6 +20,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
@@ -67,6 +68,7 @@ type App struct {
 	showFilePrompt            bool                      // Whether file creation prompt is showing
 	showFilePicker            bool                      // Whether file picker dialog is showing
 	showBackupPicker          bool                      // Whether backup picker dialog is showing
+	showChatLoader            bool                      // Whether chat loader dialog is showing
 	showHelp                  bool                      // Whether help dialog is showing
 	showEditorHelp            bool                      // Whether editor shortcuts dialog is showing
 	showLanguageInstallPrompt bool                      // Whether language install prompt is showing
@@ -75,6 +77,7 @@ type App struct {
 	filePromptBuffer          string                    // Buffer for file name input
 	fileList                  []string                  // List of files for picker
 	backupList                []string                  // List of backups for picker
+	chatList                  []string                  // List of saved chats for loader
 	filePickerIndex           int                       // Selected index in file picker
 	forceQuit                 bool                      // Whether to quit without save confirmation
 	statusMessage             string                    // Status bar message
@@ -180,7 +183,7 @@ func (a *App) Init() tea.Cmd {
 //   - Ctrl+N: New file prompt
 //   - Ctrl+T: Clear AI chat history
 //   - Ctrl+H: Toggle help
-//   - Ctrl+A: Insert full AI response into editor
+//   - Ctrl+A: Save full chat history to .ti/ folder
 //   - Tab: Switch between editor and AI panes
 //   - Ctrl+S: Save file
 //   - Ctrl+X: Close file
@@ -542,6 +545,56 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Handle chat loader dialog
+		if a.showChatLoader {
+			switch msg.String() {
+			case "up", "k":
+				if a.filePickerIndex > 0 {
+					a.filePickerIndex--
+				}
+				return a, nil
+			case "down", "j":
+				if a.filePickerIndex < len(a.chatList)-1 {
+					a.filePickerIndex++
+				}
+				return a, nil
+			case "enter":
+				// Load selected chat
+				if len(a.chatList) > 0 && a.filePickerIndex < len(a.chatList) {
+					selectedChat := a.chatList[a.filePickerIndex]
+					chatPath := filepath.Join(a.config.WorkspaceDir, ".ti", selectedChat)
+
+					content, err := os.ReadFile(chatPath)
+					if err != nil {
+						a.statusMessage = "Error reading chat: " + err.Error()
+					} else {
+						// Parse and load chat into AI pane
+						err = a.loadChatHistory(string(content))
+						if err != nil {
+							a.statusMessage = "Error loading chat: " + err.Error()
+						} else {
+							a.statusMessage = "Loaded chat: " + selectedChat
+							// Switch to AI pane
+							a.activePane = types.AIPaneType
+							a.editorPane.focused = false
+							a.aiPane.focused = true
+						}
+					}
+				}
+				a.showChatLoader = false
+				a.chatList = nil
+				a.filePickerIndex = 0
+				return a, nil
+			case "esc":
+				// Cancel chat loader
+				a.showChatLoader = false
+				a.chatList = nil
+				a.filePickerIndex = 0
+				return a, nil
+			}
+			return a, nil
+		}
+
 		// Handle backup picker dialog
 		if a.showBackupPicker {
 			switch msg.String() {
@@ -793,40 +846,133 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "ctrl+a":
-			// Insert entire last assistant response into editor file
-			response := a.aiPane.GetLastAssistantResponse()
-			if response == "" {
-				a.statusMessage = "No AI response to insert"
+			// Save entire AI chat history to .ti/ folder
+			history := a.aiPane.GetHistory()
+			if len(history) == 0 {
+				a.statusMessage = "No chat history to save"
 				return a, nil
 			}
-			if a.editorPane.currentFile != nil {
-				// Append response to current file
-				currentContent := a.editorPane.GetContent()
-				if currentContent != "" {
-					a.editorPane.SetContent(currentContent + "\n" + response)
-				} else {
-					a.editorPane.SetContent(response)
+
+			// Find the first user message timestamp for filename
+			var firstUserTime time.Time
+			var firstUserQuery string
+			for _, msg := range history {
+				if msg.Role == "user" && !msg.IsNotification && !msg.IsFixRequest {
+					firstUserTime = msg.Timestamp
+					// Extract first few words for filename (max 50 chars)
+					firstUserQuery = msg.Content
+					if len(firstUserQuery) > 50 {
+						firstUserQuery = firstUserQuery[:50]
+					}
+					// Clean up for filename - remove special chars
+					firstUserQuery = strings.Map(func(r rune) rune {
+						if r == ' ' {
+							return '-'
+						}
+						if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
+							return r
+						}
+						return -1
+					}, firstUserQuery)
+					break
+				}
+			}
+
+			// Use current time if no user message found
+			if firstUserTime.IsZero() {
+				firstUserTime = time.Now()
+				firstUserQuery = "chat"
+			}
+
+			// Create .ti directory if it doesn't exist
+			tiDir := filepath.Join(a.config.WorkspaceDir, ".ti")
+			err := os.MkdirAll(tiDir, 0755)
+			if err != nil {
+				a.statusMessage = "Error creating .ti directory: " + err.Error()
+				return a, nil
+			}
+
+			// Format filename: chat-YYYY-MM-DD-HH-MM-SS-query.md
+			filename := fmt.Sprintf("chat-%s-%s.md",
+				firstUserTime.Format("2006-01-02-15-04-05"),
+				firstUserQuery)
+			filepath := filepath.Join(tiDir, filename)
+
+			// Build chat content
+			var chatContent strings.Builder
+			for _, msg := range history {
+				// Skip notifications and fix requests
+				if msg.IsNotification || msg.IsFixRequest {
+					continue
 				}
 
-				// Save the file automatically
-				err := a.editorPane.SaveFile()
-				if err != nil {
-					a.statusMessage = "Response inserted but save failed: " + err.Error()
-				} else {
-					a.statusMessage = "Full response inserted and saved to " + a.editorPane.currentFile.Filepath
-				}
+				// Format: role timestamp\ncontent\n\n
+				chatContent.WriteString(msg.Role)
+				chatContent.WriteString(" ")
+				chatContent.WriteString(msg.Timestamp.Format("15:04:05"))
+				chatContent.WriteString("\n")
+				chatContent.WriteString(msg.Content)
+				chatContent.WriteString("\n\n")
+			}
 
+			// Save to file
+			err = os.WriteFile(filepath, []byte(chatContent.String()), 0644)
+			if err != nil {
+				a.statusMessage = "Error saving chat: " + err.Error()
+				return a, nil
+			}
+
+			// Open the saved file in editor
+			err = a.editorPane.LoadFile(filepath)
+			if err != nil {
+				a.statusMessage = "Chat saved to " + filename + " but failed to open: " + err.Error()
+			} else {
+				a.statusMessage = "Chat saved to " + filename
 				// Switch to editor pane to show the result
 				a.activePane = types.EditorPaneType
 				a.editorPane.focused = true
 				a.aiPane.focused = false
-			} else {
-				// No file open, prompt for new file
-				a.pendingCodeInsert = response
-				a.showFilePrompt = true
-				a.filePromptBuffer = ""
-				a.statusMessage = "Enter filename to insert response"
 			}
+			return a, nil
+
+		case "ctrl+l":
+			// Open chat loader to reload saved chats
+			tiDir := filepath.Join(a.config.WorkspaceDir, ".ti")
+
+			// Check if .ti directory exists
+			if _, err := os.Stat(tiDir); os.IsNotExist(err) {
+				a.statusMessage = "No saved chats found (.ti directory doesn't exist)"
+				return a, nil
+			}
+
+			// List all chat-*.md files in .ti directory
+			entries, err := os.ReadDir(tiDir)
+			if err != nil {
+				a.statusMessage = "Error reading .ti directory: " + err.Error()
+				return a, nil
+			}
+
+			var chatFiles []string
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasPrefix(entry.Name(), "chat-") && strings.HasSuffix(entry.Name(), ".md") {
+					chatFiles = append(chatFiles, entry.Name())
+				}
+			}
+
+			if len(chatFiles) == 0 {
+				a.statusMessage = "No saved chats found in .ti directory"
+				return a, nil
+			}
+
+			// Sort chats: newest first (reverse order)
+			for i, j := 0, len(chatFiles)-1; i < j; i, j = i+1, j-1 {
+				chatFiles[i], chatFiles[j] = chatFiles[j], chatFiles[i]
+			}
+
+			a.chatList = chatFiles
+			a.filePickerIndex = 0
+			a.showChatLoader = true
+			a.statusMessage = fmt.Sprintf("Found %d saved chats (Newest first)", len(chatFiles))
 			return a, nil
 
 		case "tab":
@@ -1193,6 +1339,60 @@ func (a *App) View() string {
 		return a.renderEditorHelpDialog()
 	}
 
+	// Show chat loader dialog if needed
+	if a.showChatLoader {
+		pickerStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(80).
+			Align(lipgloss.Left)
+
+		selectedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62")).
+			Bold(true)
+
+		normalStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+		var listDisplay string
+		listDisplay = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Render("Select a chat to load:") + "\n\n"
+
+		maxDisplay := 15
+		startIdx := a.filePickerIndex - maxDisplay/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := startIdx + maxDisplay
+		if endIdx > len(a.chatList) {
+			endIdx = len(a.chatList)
+			startIdx = endIdx - maxDisplay
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			displayName := a.chatList[i]
+			if i == a.filePickerIndex {
+				listDisplay += selectedStyle.Render("> "+displayName) + "\n"
+			} else {
+				listDisplay += normalStyle.Render("  "+displayName) + "\n"
+			}
+		}
+
+		listDisplay += "\n" + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("240")).
+			Render("[↑↓] Navigate | [Enter] Load | [Esc] Cancel")
+
+		dialog := pickerStyle.Render(listDisplay)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
 	// Show backup picker dialog if needed
 	if a.showBackupPicker {
 		pickerStyle := lipgloss.NewStyle().
@@ -1557,7 +1757,8 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "--\n"
 		helpText += "  Ctrl+Y    List code blocks (Execute/Insert/Return)\n"
 		helpText += "  Ctrl+P    Insert selected code into editor\n"
-		helpText += "  Ctrl+A    Insert full AI response into file\n"
+		helpText += "  Ctrl+A    Save full chat history to .ti/ folder\n"
+		helpText += "  Ctrl+L    Load saved chat from .ti/ folder\n"
 		helpText += "  Ctrl+T    Clear chat / New chat\n\n"
 		helpText += "Navigation\n"
 		helpText += "----------\n"
@@ -1670,4 +1871,81 @@ func (a *App) ensureGoModule(dir string) {
 		tidyCmd.Dir = dir
 		tidyCmd.Run()
 	}()
+}
+
+// loadChatHistory parses a saved chat file and loads it into the AI pane
+// Format expected: "role timestamp\ncontent\n\n"
+func (a *App) loadChatHistory(content string) error {
+	// Clear existing chat history
+	a.aiPane.ClearHistory()
+
+	// Parse the chat file
+	lines := strings.Split(content, "\n")
+	var currentRole string
+	var currentTimestamp time.Time
+	var currentContent strings.Builder
+
+	for i := 0; i < len(lines); i++ {
+		line := lines[i]
+
+		// Check if this is a role line (starts with "user " or "assistant ")
+		if strings.HasPrefix(line, "user ") || strings.HasPrefix(line, "assistant ") {
+			// Save previous message if exists
+			if currentRole != "" && currentContent.Len() > 0 {
+				msg := types.ChatMessage{
+					Role:      currentRole,
+					Content:   strings.TrimSpace(currentContent.String()),
+					Timestamp: currentTimestamp,
+				}
+				a.aiPane.messages = append(a.aiPane.messages, msg)
+			}
+
+			// Parse new message header
+			parts := strings.SplitN(line, " ", 2)
+			if len(parts) == 2 {
+				currentRole = parts[0]
+				// Parse timestamp (format: HH:MM:SS)
+				timeStr := strings.TrimSpace(parts[1])
+				parsedTime, err := time.Parse("15:04:05", timeStr)
+				if err != nil {
+					// If parsing fails, use current time
+					currentTimestamp = time.Now()
+				} else {
+					// Use today's date with the parsed time
+					now := time.Now()
+					currentTimestamp = time.Date(now.Year(), now.Month(), now.Day(),
+						parsedTime.Hour(), parsedTime.Minute(), parsedTime.Second(), 0, now.Location())
+				}
+				currentContent.Reset()
+			}
+		} else if line == "" && currentContent.Len() > 0 {
+			// Empty line might indicate end of message, but continue accumulating
+			// in case there are blank lines within the content
+			currentContent.WriteString("\n")
+		} else if currentRole != "" {
+			// Accumulate content
+			if currentContent.Len() > 0 {
+				currentContent.WriteString("\n")
+			}
+			currentContent.WriteString(line)
+		}
+	}
+
+	// Save last message if exists
+	if currentRole != "" && currentContent.Len() > 0 {
+		msg := types.ChatMessage{
+			Role:      currentRole,
+			Content:   strings.TrimSpace(currentContent.String()),
+			Timestamp: currentTimestamp,
+		}
+		a.aiPane.messages = append(a.aiPane.messages, msg)
+	}
+
+	// Extract code blocks from loaded messages
+	a.aiPane.extractCodeBlocks()
+
+	// Scroll to bottom
+	a.aiPane.scrollToBottom()
+
+	return nil
 }

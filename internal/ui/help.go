@@ -46,7 +46,8 @@ func (a *App) renderHelpDialog() string {
 	helpText += sectionStyle.Render("── AI ────────────────────────────────────────") + "\n"
 	helpText += keyStyle.Render("  Ctrl+Y") + descStyle.Render("    List code blocks (Execute/Insert/Return)") + "\n"
 	helpText += keyStyle.Render("  Ctrl+P") + descStyle.Render("    Insert selected code into editor") + "\n"
-	helpText += keyStyle.Render("  Ctrl+A") + descStyle.Render("    Insert full AI response into file") + "\n"
+	helpText += keyStyle.Render("  Ctrl+A") + descStyle.Render("    Save full chat history to .ti/ folder") + "\n"
+	helpText += keyStyle.Render("  Ctrl+L") + descStyle.Render("    Load saved chat from .ti/ folder") + "\n"
 	helpText += keyStyle.Render("  Ctrl+T") + descStyle.Render("    Clear chat / New chat") + "\n"
 	helpText += "\n"
 

@@ -1473,15 +1473,8 @@ func (a *AIChatPane) View() string {
 			string(rune('0'+len(a.messages)%10)) + ")"
 	}
 
-	// Add provider indicator
-	if a.provider == "gemini" {
-		title += " [Gemini]"
-	} else {
-		title += " [Ollama]"
-	}
-
 	// Add instructions to title
-	title += " | Ctrl+Y: Code | ↑↓: Scroll | Ctrl+T: New Chat"
+	title += " | Ctrl+Y: Code | Ctrl+A: Save | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New"
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
