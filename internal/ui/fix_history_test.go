@@ -10,7 +10,7 @@ import (
 // TestAddFixRequest verifies that fix requests are added to conversation history
 func TestAddFixRequest(t *testing.T) {
 	// Create AI pane (nil client is fine for this test)
-	aiPane := NewAIChatPane(nil, "test-model", "ollama")
+	aiPane := NewAIChatPane(nil, "test-model", "ollama", "")
 	aiPane.SetSize(80, 24)
 
 	// Add a fix request
@@ -44,7 +44,7 @@ func TestAddFixRequest(t *testing.T) {
 
 // TestFixRequestAndNotificationInHistory verifies the full flow of fix request and notification
 func TestFixRequestAndNotificationInHistory(t *testing.T) {
-	aiPane := NewAIChatPane(nil, "test-model", "ollama")
+	aiPane := NewAIChatPane(nil, "test-model", "ollama", "")
 	aiPane.SetSize(80, 24)
 
 	// Add a fix request
@@ -89,7 +89,7 @@ func TestFixRequestAndNotificationInHistory(t *testing.T) {
 
 // TestRenderFixRequestMessage verifies that fix requests are rendered with file path context
 func TestRenderFixRequestMessage(t *testing.T) {
-	aiPane := NewAIChatPane(nil, "test-model", "ollama")
+	aiPane := NewAIChatPane(nil, "test-model", "ollama", "")
 	aiPane.SetSize(80, 24)
 
 	// Create a fix request message
@@ -122,7 +122,7 @@ func TestRenderFixRequestMessage(t *testing.T) {
 
 // TestConversationalMessageNotMarkedAsFixRequest verifies conversational messages are not marked as fix requests
 func TestConversationalMessageNotMarkedAsFixRequest(t *testing.T) {
-	aiPane := NewAIChatPane(nil, "test-model", "ollama")
+	aiPane := NewAIChatPane(nil, "test-model", "ollama", "")
 	aiPane.SetSize(80, 24)
 
 	// Add a regular conversational message using SendMessage

@@ -143,7 +143,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		aiClient:             aiClient,
 		agenticFixer:         agenticFixer,
 		editorPane:           NewEditorPane(fm),
-		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider),
+		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider, config.WorkspaceDir),
 		activePane:           types.EditorPaneType,
 		ready:                false,
 		showExitConfirmation: false,
@@ -349,6 +349,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case InsertCodeMsg:
 		// Handle code insertion from AI pane
 		selectedCode := a.aiPane.GetSelectedCodeBlock()
+		effectiveDir := msg.EffectiveDir
 		a.statusMessage = "InsertCodeMsg received, code length: " + string(rune('0'+len(selectedCode)/100%10)) + string(rune('0'+len(selectedCode)/10%10)) + string(rune('0'+len(selectedCode)%10))
 		if selectedCode != "" {
 			// Check if a file is open
@@ -376,6 +377,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// No file open — load code into editor as unsaved buffer
 				suggestedName := a.aiPane.GetSuggestedFilename()
+
+				// Prepend effective dir to suggested filename when it differs from workspace root
+				if suggestedName != "" && effectiveDir != "" && effectiveDir != a.config.WorkspaceDir {
+					relDir, err := filepath.Rel(a.config.WorkspaceDir, effectiveDir)
+					if err == nil && relDir != "." {
+						suggestedName = filepath.Join(relDir, suggestedName)
+					}
+				}
+
 				a.editorPane.SetContentUnsaved(selectedCode, suggestedName)
 
 				// Switch to editor pane
@@ -384,7 +394,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.aiPane.focused = false
 
 				if suggestedName != "" {
-					a.statusMessage = "Code loaded (suggested name: " + suggestedName + ") — Ctrl+S to save"
+					// Show resolved save path when effective dir differs from workspace root
+					if effectiveDir != "" && effectiveDir != a.config.WorkspaceDir {
+						a.statusMessage = "Code loaded (save path: " + suggestedName + ") — Ctrl+S to save"
+					} else {
+						a.statusMessage = "Code loaded (suggested name: " + suggestedName + ") — Ctrl+S to save"
+					}
 				} else {
 					a.statusMessage = "Code loaded — Ctrl+S to save with a filename"
 				}
@@ -844,8 +859,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// No file yet — check for AI-suggested name
 					suggested := a.editorPane.GetSuggestedName()
 					if suggested != "" {
-						// Use the suggested name directly
+						// Use the suggested name directly (may already include effective dir from InsertCodeMsg)
 						filePath := suggested
+
+						// If the suggested name is a plain filename (no directory component),
+						// check if the AI pane has an effective directory to use
+						if filepath.Dir(filePath) == "." {
+							effectiveDir := a.aiPane.GetSelectedBlockDir()
+							if effectiveDir != "" && effectiveDir != a.config.WorkspaceDir {
+								relDir, err := filepath.Rel(a.config.WorkspaceDir, effectiveDir)
+								if err == nil && relDir != "." {
+									filePath = filepath.Join(relDir, filePath)
+								}
+							}
+						}
+
 						err := a.fileManager.CreateFile(filePath, a.editorPane.GetContent())
 						if err != nil {
 							a.statusMessage = "Error creating file: " + err.Error()

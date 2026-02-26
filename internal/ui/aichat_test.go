@@ -9,7 +9,7 @@ import (
 // TestDisplayNotification verifies that notifications are displayed with distinct formatting
 func TestDisplayNotification(t *testing.T) {
 	// Create a mock AI client (nil is fine for this test)
-	pane := NewAIChatPane(nil, "test-model", "ollama")
+	pane := NewAIChatPane(nil, "test-model", "ollama", "")
 	pane.SetSize(80, 24)
 
 	// Display a notification
@@ -40,7 +40,7 @@ func TestDisplayNotification(t *testing.T) {
 
 // TestRenderNotificationMessage verifies that notification messages are rendered with distinct styling
 func TestRenderNotificationMessage(t *testing.T) {
-	pane := NewAIChatPane(nil, "test-model", "ollama")
+	pane := NewAIChatPane(nil, "test-model", "ollama", "")
 	pane.SetSize(80, 24)
 
 	// Create a notification message
@@ -85,7 +85,7 @@ func TestRenderNotificationMessage(t *testing.T) {
 
 // TestDisplayNotificationAutoScroll verifies that displaying a notification scrolls to bottom
 func TestDisplayNotificationAutoScroll(t *testing.T) {
-	pane := NewAIChatPane(nil, "test-model", "ollama")
+	pane := NewAIChatPane(nil, "test-model", "ollama", "")
 	pane.SetSize(80, 10) // Small height to force scrolling
 
 	// Add multiple messages to force scrolling
@@ -111,4 +111,76 @@ func TestDisplayNotificationAutoScroll(t *testing.T) {
 	} else if pane.scrollOffset <= scrollBefore {
 		t.Errorf("expected scroll offset to increase after notification")
 	}
+}
+
+// --- Tests for extractCodeBlockInfos (Task 6.3) ---
+
+func TestExtractCodeBlockInfos(t *testing.T) {
+	tests := []struct {
+		name           string
+		content        string
+		expectedCount  int
+		expectedLangs  []string
+		expectedBodies []string // substring checks on Content
+	}{
+		{
+			name:           "language tag extraction - bash",
+			content:        "Some text\n```bash\necho hello\n```\n",
+			expectedCount:  1,
+			expectedLangs:  []string{"bash"},
+			expectedBodies: []string{"echo hello"},
+		},
+		{
+			name:           "language tag extraction - go",
+			content:        "Here is code:\n```go\npackage main\n```\n",
+			expectedCount:  1,
+			expectedLangs:  []string{"go"},
+			expectedBodies: []string{"package main"},
+		},
+		{
+			name:           "missing language tag",
+			content:        "Code:\n```\nsome code\n```\n",
+			expectedCount:  1,
+			expectedLangs:  []string{""},
+			expectedBodies: []string{"some code"},
+		},
+		{
+			name:           "multiple blocks with different languages",
+			content:        "Step 1:\n```bash\nmkdir proj\n```\nStep 2:\n```go\npackage main\n```\nStep 3:\n```python\nprint('hi')\n```\n",
+			expectedCount:  3,
+			expectedLangs:  []string{"bash", "go", "python"},
+			expectedBodies: []string{"mkdir proj", "package main", "print('hi')"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			infos := extractCodeBlockInfos(tc.content)
+			if len(infos) != tc.expectedCount {
+				t.Fatalf("expected %d blocks, got %d", tc.expectedCount, len(infos))
+			}
+			for i := range infos {
+				if infos[i].Language != tc.expectedLangs[i] {
+					t.Errorf("block[%d].Language = %q, want %q", i, infos[i].Language, tc.expectedLangs[i])
+				}
+				if !contains(infos[i].Content, tc.expectedBodies[i]) {
+					t.Errorf("block[%d].Content = %q, want it to contain %q", i, infos[i].Content, tc.expectedBodies[i])
+				}
+			}
+		})
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		(len(s) > 0 && len(substr) > 0 && stringContains(s, substr)))
+}
+
+func stringContains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
 }

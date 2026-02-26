@@ -15,6 +15,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/ai"
+	"github.com/user/terminal-intelligence/internal/dirtracker"
 	"github.com/user/terminal-intelligence/internal/types"
 )
 
@@ -44,41 +45,44 @@ import (
 //   - DisplayNotification: Shows fix results with distinct styling
 //   - GetLastAssistantResponse: Retrieves last AI response for insertion
 type AIChatPane struct {
-	messages         []types.ChatMessage // Conversation history
-	inputBuffer      string              // Current input being typed
-	aiClient         ai.AIClient         // AI service client
-	model            string              // AI model to use
-	provider         string              // "ollama" or "gemini"
-	scrollOffset     int                 // Vertical scroll offset for responses
-	width            int                 // Pane width
-	height           int                 // Pane height
-	focused          bool                // Whether this pane is focused
-	streaming        bool                // Whether AI is currently generating
-	copyMode         bool                // Whether in code block selection mode
-	viewMode         bool                // Whether viewing a code block
-	codeBlocks       []string            // Extracted code blocks from responses
-	selectedBlock    int                 // Currently selected code block index
-	lastSelectedCode string              // Last selected code block content
-	lastKeyPressed   string              // Last key pressed (for debugging)
-	activeArea       int                 // 0: Input, 1: Response
-	viewModeScroll   int                 // Scroll offset for code block view mode
-	viewModeScrollX  int                 // Horizontal scroll offset for code block view mode
-	configMode       bool                // Whether in config editor mode
-	configFields     []string            // Config field names
-	configValues     []string            // Config field values
-	selectedField    int                 // Currently selected config field
-	editingField     bool                // Whether currently editing a field
-	editBuffer       string              // Buffer for editing field value
-	editCursorPos    int                 // Cursor position within edit buffer
-	terminalMode     bool                // Whether terminal execution is active
-	cmdRunning       bool                // Whether the command is currently running
-	terminalOutput   []string            // Output lines from terminal execution
-	stdinWriter      io.WriteCloser      // Stdin pipe for sending input to running command
-	terminalInput    string              // Current input line being typed in terminal mode
-	aiAvailable      bool                // Whether the AI service is reachable
-	aiChecked        bool                // Whether the availability check has completed
-	suggestedFile    string              // Filename suggested by AI for the current code block
-	workingDir       string              // Directory from which to execute commands
+	messages         []types.ChatMessage        // Conversation history
+	inputBuffer      string                     // Current input being typed
+	aiClient         ai.AIClient                // AI service client
+	model            string                     // AI model to use
+	provider         string                     // "ollama" or "gemini"
+	scrollOffset     int                        // Vertical scroll offset for responses
+	width            int                        // Pane width
+	height           int                        // Pane height
+	focused          bool                       // Whether this pane is focused
+	streaming        bool                       // Whether AI is currently generating
+	copyMode         bool                       // Whether in code block selection mode
+	viewMode         bool                       // Whether viewing a code block
+	codeBlocks       []string                   // Extracted code blocks from responses
+	selectedBlock    int                        // Currently selected code block index
+	lastSelectedCode string                     // Last selected code block content
+	lastKeyPressed   string                     // Last key pressed (for debugging)
+	activeArea       int                        // 0: Input, 1: Response
+	viewModeScroll   int                        // Scroll offset for code block view mode
+	viewModeScrollX  int                        // Horizontal scroll offset for code block view mode
+	configMode       bool                       // Whether in config editor mode
+	configFields     []string                   // Config field names
+	configValues     []string                   // Config field values
+	selectedField    int                        // Currently selected config field
+	editingField     bool                       // Whether currently editing a field
+	editBuffer       string                     // Buffer for editing field value
+	editCursorPos    int                        // Cursor position within edit buffer
+	terminalMode     bool                       // Whether terminal execution is active
+	cmdRunning       bool                       // Whether the command is currently running
+	terminalOutput   []string                   // Output lines from terminal execution
+	stdinWriter      io.WriteCloser             // Stdin pipe for sending input to running command
+	terminalInput    string                     // Current input line being typed in terminal mode
+	aiAvailable      bool                       // Whether the AI service is reachable
+	aiChecked        bool                       // Whether the availability check has completed
+	suggestedFile    string                     // Filename suggested by AI for the current code block
+	workingDir       string                     // Directory from which to execute commands
+	codeBlockInfos   []dirtracker.CodeBlockInfo // Code blocks with language tags
+	blockDirMappings []string                   // Effective dir per code block index
+	workspaceRoot    string                     // From AppConfig.WorkspaceDir
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -90,7 +94,9 @@ type AIResponseMsg struct {
 
 // InsertCodeMsg is sent when user wants to insert code into editor.
 // Triggered by Ctrl+P in view mode.
-type InsertCodeMsg struct{}
+type InsertCodeMsg struct {
+	EffectiveDir string // The effective working directory for the selected code block
+}
 
 // SendAIMessageMsg is sent when user wants to send a message to AI.
 // Triggered by Enter in input area.
@@ -168,11 +174,27 @@ type LanguageInstallResultMsg struct {
 //
 // Returns:
 //   - *AIChatPane: Initialized AI chat pane
-func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPane {
+//
+// NewAIChatPane creates a new AI chat pane.
+// Initializes an empty conversation with the specified AI client and model.
+// Defaults to "llama2" model if none is specified.
+//
+// Parameters:
+//   - client: AI service client (Ollama or Gemini)
+//   - model: AI model identifier
+//   - provider: Provider name ("ollama" or "gemini")
+//   - workspaceRoot: Workspace root directory from AppConfig.WorkspaceDir
+//
+// Returns:
+//   - *AIChatPane: Initialized AI chat pane
+func NewAIChatPane(client ai.AIClient, model string, provider string, workspaceRoot string) *AIChatPane {
 	if model == "" {
 		model = "llama2"
 	}
 	cwd, _ := os.Getwd()
+	if workspaceRoot == "" {
+		workspaceRoot = cwd
+	}
 	return &AIChatPane{
 		messages:       []types.ChatMessage{},
 		inputBuffer:    "",
@@ -187,6 +209,7 @@ func NewAIChatPane(client ai.AIClient, model string, provider string) *AIChatPan
 		activeArea:     0, // 0: Input, 1: Response
 		terminalOutput: []string{},
 		workingDir:     cwd,
+		workspaceRoot:  workspaceRoot,
 	}
 }
 
@@ -195,6 +218,42 @@ func (a *AIChatPane) SetWorkingDir(dir string) {
 	if dir != "" {
 		a.workingDir = dir
 	}
+}
+
+// GetSelectedBlockDir returns the effective working directory for the currently
+// selected code block. If no directory mapping exists, returns workspaceRoot.
+func (a *AIChatPane) GetSelectedBlockDir() string {
+	if a.selectedBlock >= 0 && a.selectedBlock < len(a.blockDirMappings) {
+		if dir := a.blockDirMappings[a.selectedBlock]; dir != "" {
+			return dir
+		}
+	}
+	return a.workspaceRoot
+}
+
+// GetSelectedBlockStartDir returns the directory where execution should START for the selected block.
+// For bash blocks, this is the PREVIOUS block's effective directory (since bash blocks change directories).
+// For non-bash blocks, this is the current block's effective directory.
+func (a *AIChatPane) GetSelectedBlockStartDir() string {
+	// Check if current block is a bash block
+	if a.selectedBlock >= 0 && a.selectedBlock < len(a.codeBlockInfos) {
+		lang := strings.ToLower(strings.TrimSpace(a.codeBlockInfos[a.selectedBlock].Language))
+		isBash := lang == "bash" || lang == "sh" || lang == "shell"
+
+		if isBash {
+			// For bash blocks, use the previous block's effective directory
+			if a.selectedBlock > 0 && a.selectedBlock-1 < len(a.blockDirMappings) {
+				if dir := a.blockDirMappings[a.selectedBlock-1]; dir != "" {
+					return dir
+				}
+			}
+			// If this is the first block, use workspace root
+			return a.workspaceRoot
+		}
+	}
+
+	// For non-bash blocks, use the current block's effective directory
+	return a.GetSelectedBlockDir()
 }
 
 // CheckAIAvailability returns a tea.Cmd that checks if the configured AI
@@ -380,17 +439,26 @@ func (a *AIChatPane) AddFixRequest(message string, filePath string) {
 // Updates the codeBlocks slice for use in copy mode.
 func (a *AIChatPane) extractCodeBlocks() {
 	a.codeBlocks = []string{}
+	a.codeBlockInfos = []dirtracker.CodeBlockInfo{}
 	a.suggestedFile = ""
 	for _, msg := range a.messages {
 		if msg.Role == "assistant" {
 			blocks := extractCodeFromMarkdown(msg.Content)
 			a.codeBlocks = append(a.codeBlocks, blocks...)
+
+			infos := extractCodeBlockInfos(msg.Content)
+			a.codeBlockInfos = append(a.codeBlockInfos, infos...)
+
 			// Extract suggested filename from the last assistant message that has one
 			if name := extractSuggestedFilename(msg.Content); name != "" {
 				a.suggestedFile = name
 			}
 		}
 	}
+
+	// Compute directory mappings from the extracted code block infos
+	dt := dirtracker.New(a.workspaceRoot)
+	a.blockDirMappings = dt.ComputeMappings(a.codeBlockInfos)
 }
 
 // extractCodeFromMarkdown extracts code blocks from markdown.
@@ -428,9 +496,42 @@ func extractCodeFromMarkdown(content string) []string {
 	return blocks
 }
 
-// extractSuggestedFilename looks for a filename suggested by the AI in the response text.
-// It searches for patterns like `filename.sh`, "filename.sh", or filename.ext near
-// keywords like "save it to", "save it as", "for example", "called", "named".
+// extractCodeBlockInfos parses markdown content for fenced code blocks,
+// capturing the language identifier from the opening ``` line.
+// Returns a slice of CodeBlockInfo with Language and Content populated.
+func extractCodeBlockInfos(content string) []dirtracker.CodeBlockInfo {
+	var infos []dirtracker.CodeBlockInfo
+	lines := strings.Split(content, "\n")
+	var currentBlock strings.Builder
+	var currentLang string
+	inBlock := false
+
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") {
+			if inBlock {
+				// End of code block
+				infos = append(infos, dirtracker.CodeBlockInfo{
+					Language: currentLang,
+					Content:  currentBlock.String(),
+				})
+				currentBlock.Reset()
+				currentLang = ""
+				inBlock = false
+			} else {
+				// Start of code block — extract language tag after ```
+				currentLang = strings.TrimSpace(trimmed[3:])
+				inBlock = true
+			}
+		} else if inBlock {
+			currentBlock.WriteString(line)
+			currentBlock.WriteString("\n")
+		}
+	}
+
+	return infos
+}
+
 var suggestedFileRe = regexp.MustCompile("(?i)(?:save (?:it )?(?:to|as)(?: a file)?|for example|called|named|create(?: a file)?)[^`\"]{0,30}[`\"]([\\w/-]+\\.[a-z0-9]{1,4})[`\"]")
 
 func extractSuggestedFilename(content string) string {
@@ -446,6 +547,8 @@ func extractSuggestedFilename(content string) string {
 func (a *AIChatPane) ClearHistory() {
 	a.messages = []types.ChatMessage{}
 	a.scrollOffset = 0
+	a.codeBlockInfos = []dirtracker.CodeBlockInfo{}
+	a.blockDirMappings = []string{}
 }
 
 // GetHistory returns conversation history.
@@ -510,20 +613,28 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 }
 
 // executeCommand executes a script and streams output to Bubble Tea messages.
-func (a *AIChatPane) executeCommand(script string) tea.Cmd {
+// The cwd parameter specifies the working directory for command execution.
+// If cwd is empty, falls back to a.workingDir.
+func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 	outChan := make(chan tea.Msg)
+
+	// Determine effective working directory
+	effectiveDir := cwd
+	if effectiveDir == "" {
+		effectiveDir = a.workingDir
+	}
 
 	go func() {
 		// Preliminary Go initialization check
 		if strings.Contains(script, "go get") || strings.Contains(script, "go run") || strings.Contains(script, "go build") || strings.Contains(script, "go test") || strings.Contains(script, "go install") {
 			cmdCheck := exec.Command("go", "env", "GOMOD")
-			if a.workingDir != "" {
-				cmdCheck.Dir = a.workingDir
+			if effectiveDir != "" {
+				cmdCheck.Dir = effectiveDir
 			}
 			out, err := cmdCheck.Output()
 			outStr := strings.TrimSpace(string(out))
 			if err != nil || outStr == "" || outStr == os.DevNull || outStr == "NUL" {
-				baseName := filepath.Base(a.workingDir)
+				baseName := filepath.Base(effectiveDir)
 				if baseName == "." || baseName == "" || baseName == string(filepath.Separator) {
 					baseName = "ti-project"
 				}
@@ -531,14 +642,14 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 				baseName = strings.ToLower(baseName)
 
 				initCmd := exec.Command("go", "mod", "init", baseName)
-				if a.workingDir != "" {
-					initCmd.Dir = a.workingDir
+				if effectiveDir != "" {
+					initCmd.Dir = effectiveDir
 				}
 				initCmd.Run()
 
 				tidyCmd := exec.Command("go", "mod", "tidy")
-				if a.workingDir != "" {
-					tidyCmd.Dir = a.workingDir
+				if effectiveDir != "" {
+					tidyCmd.Dir = effectiveDir
 				}
 				tidyCmd.Run()
 			}
@@ -546,13 +657,16 @@ func (a *AIChatPane) executeCommand(script string) tea.Cmd {
 
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("powershell", "-NoProfile", "-Command", script)
+			// For Windows, convert newlines to semicolons for PowerShell
+			// This allows multi-line bash-style scripts to work properly
+			psScript := strings.ReplaceAll(script, "\n", "; ")
+			cmd = exec.Command("powershell", "-NoProfile", "-Command", psScript)
 		} else {
 			cmd = exec.Command("sh", "-c", script)
 		}
 
-		if a.workingDir != "" {
-			cmd.Dir = a.workingDir
+		if effectiveDir != "" {
+			cmd.Dir = effectiveDir
 		}
 
 		stdin, _ := cmd.StdinPipe()
@@ -804,15 +918,31 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 			a.viewModeScroll = 0
 			a.terminalMode = false
 			// Return a custom message to trigger insert
+			effectiveDir := a.GetSelectedBlockDir()
 			return func() tea.Msg {
-				return InsertCodeMsg{}
+				return InsertCodeMsg{EffectiveDir: effectiveDir}
 			}
 		case "0":
 			if !a.cmdRunning {
+				// Check if this is a Go code block (non-executable)
+				isGoCode := false
+				if a.selectedBlock >= 0 && a.selectedBlock < len(a.codeBlockInfos) {
+					lang := strings.ToLower(strings.TrimSpace(a.codeBlockInfos[a.selectedBlock].Language))
+					isGoCode = lang == "go" || lang == "golang"
+				}
+
+				// Don't allow execution of Go code blocks
+				if isGoCode {
+					return nil
+				}
+
 				a.terminalMode = true
 				a.cmdRunning = true
 
+				effectiveDir := a.GetSelectedBlockStartDir()
+
 				var initOutput []string
+				initOutput = append(initOutput, "▶ Running in: "+effectiveDir)
 				for _, line := range strings.Split(a.codeBlocks[a.selectedBlock], "\n") {
 					initOutput = append(initOutput, "> "+line)
 				}
@@ -820,7 +950,7 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 
 				a.terminalOutput = initOutput
 				a.viewModeScroll = 0
-				return a.executeCommand(a.codeBlocks[a.selectedBlock])
+				return a.executeCommand(a.codeBlocks[a.selectedBlock], effectiveDir)
 			}
 		case "up", "k":
 			if a.viewModeScroll > 0 {
@@ -1517,15 +1647,36 @@ func (a *AIChatPane) renderViewMode() string {
 		}
 	} else {
 		displayLinesSource = strings.Split(codeBlock, "\n")
-		instructions = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("15")).
-			Background(lipgloss.Color("238")).
-			Bold(true).
-			MarginTop(1).
-			MarginBottom(1).
-			Padding(0, 1).
-			Width(a.width - 4).
-			Render(" ⚡ [0] Execute  |  [1/Ctrl+P] Insert  |  [Esc] Return  |  [↑↓/←→] Scroll ")
+
+		// Determine if this is a Go code block (non-executable)
+		isGoCode := false
+		if a.selectedBlock >= 0 && a.selectedBlock < len(a.codeBlockInfos) {
+			lang := strings.ToLower(strings.TrimSpace(a.codeBlockInfos[a.selectedBlock].Language))
+			isGoCode = lang == "go" || lang == "golang"
+		}
+
+		// Show different instructions based on code type
+		if isGoCode {
+			instructions = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("238")).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(1).
+				Padding(0, 1).
+				Width(a.width - 4).
+				Render(" 📝 [1/Ctrl+P] Insert  |  [Esc] Return  |  [↑↓/←→] Scroll ")
+		} else {
+			instructions = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("15")).
+				Background(lipgloss.Color("238")).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(1).
+				Padding(0, 1).
+				Width(a.width - 4).
+				Render(" ⚡ [0] Execute  |  [1/Ctrl+P] Insert  |  [Esc] Return  |  [↑↓/←→] Scroll ")
+		}
 	}
 
 	// Calculate available height for code content
@@ -1793,7 +1944,7 @@ func (a *AIChatPane) RunScript(command string, label string) tea.Cmd {
 	}
 	a.viewModeScroll = 0
 
-	return a.executeCommand(command)
+	return a.executeCommand(command, "")
 }
 
 // EnterConfigMode enters the configuration editor mode.
