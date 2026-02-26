@@ -474,7 +474,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
-	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg:
+	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg, ClearStatusMsg:
+		// Handle ClearStatusMsg
+		if _, ok := msg.(ClearStatusMsg); ok {
+			a.statusMessage = ""
+		}
 		cmd := a.aiPane.Update(msg)
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
@@ -1154,9 +1158,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.aiPane.focused = true
 
 			fileName := filepath.Base(filePath)
+			fileDir := filepath.Dir(filePath)
 			a.statusMessage = "Running " + fileName + "..."
 
-			cmd := a.aiPane.RunScript(runCmd, fileName)
+			cmd := a.aiPane.RunScript(runCmd, fileName, fileDir)
 			cmds = append(cmds, cmd)
 			return a, tea.Batch(cmds...)
 
@@ -1751,6 +1756,8 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  Ctrl+N    New file\n"
 		helpText += "  Ctrl+S    Save file\n"
 		helpText += "  Ctrl+X    Close file\n"
+		helpText += "  Ctrl+R    Run current script\n"
+		helpText += "  Ctrl+K    Kill running process (in terminal mode)\n"
 		helpText += "  Ctrl+B    Backup Picker (Restore previous versions)\n"
 		helpText += "  Ctrl+Q    Quit\n\n"
 		helpText += "AI\n"

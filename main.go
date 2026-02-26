@@ -54,6 +54,7 @@ func main() {
 		fmt.Println("  Tab         - Switch between editor and AI pane")
 		fmt.Println("  Ctrl+S      - Save current file")
 		fmt.Println("  Ctrl+R      - Execute current script")
+		fmt.Println("  Ctrl+K      - Kill running process (in terminal mode)")
 		fmt.Println("  Ctrl+Enter  - Send message to AI")
 		fmt.Println("  Ctrl+C      - Copy selected line or AI block")
 		fmt.Println("  Ctrl+Q      - Quit application")

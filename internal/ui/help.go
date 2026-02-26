@@ -38,6 +38,7 @@ func (a *App) renderHelpDialog() string {
 	helpText += keyStyle.Render("  Ctrl+S") + descStyle.Render("    Save file") + "\n"
 	helpText += keyStyle.Render("  Ctrl+X") + descStyle.Render("    Close file") + "\n"
 	helpText += keyStyle.Render("  Ctrl+R") + descStyle.Render("    Run current script") + "\n"
+	helpText += keyStyle.Render("  Ctrl+K") + descStyle.Render("    Kill running process (in terminal mode)") + "\n"
 	helpText += keyStyle.Render("  Ctrl+B") + descStyle.Render("    Backup Picker (Restore previous versions)") + "\n"
 	helpText += keyStyle.Render("  Ctrl+Q") + descStyle.Render("    Quit") + "\n"
 	helpText += "\n"

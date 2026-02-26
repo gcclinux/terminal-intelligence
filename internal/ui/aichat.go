@@ -83,6 +83,8 @@ type AIChatPane struct {
 	codeBlockInfos   []dirtracker.CodeBlockInfo // Code blocks with language tags
 	blockDirMappings []string                   // Effective dir per code block index
 	workspaceRoot    string                     // From AppConfig.WorkspaceDir
+	runningCmd       *exec.Cmd                  // Currently running command process (for kill support)
+	processKilled    bool                       // Whether the process was killed by user (Ctrl+K)
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -133,6 +135,9 @@ type TerminalDoneMsg struct {
 type AIAvailabilityMsg struct {
 	Available bool
 }
+
+// ClearStatusMsg is sent to clear the status message in the app.
+type ClearStatusMsg struct{}
 
 // LanguageCheckMsg is sent when a language runtime check is needed.
 type LanguageCheckMsg struct {
@@ -582,9 +587,12 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 	case AINotificationMsg:
 		a.DisplayNotification(msg.Content)
 	case TerminalOutputMsg:
-		a.terminalOutput = append(a.terminalOutput, msg.Line)
-		if a.terminalMode {
-			a.viewModeScroll = len(a.terminalOutput)
+		// Ignore output if process was killed by user
+		if !a.processKilled {
+			a.terminalOutput = append(a.terminalOutput, msg.Line)
+			if a.terminalMode {
+				a.viewModeScroll = len(a.terminalOutput)
+			}
 		}
 		return func() tea.Msg {
 			return <-msg.Output
@@ -593,12 +601,20 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 		a.cmdRunning = false
 		a.stdinWriter = nil
 		a.terminalInput = ""
-		a.terminalOutput = append(a.terminalOutput, "")
-		if msg.Err != nil {
-			a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process failed: %v]", msg.Err))
-		} else {
-			a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process exited with code %d]", msg.ExitCode))
+
+		// Only show exit message if process wasn't killed by user
+		if !a.processKilled {
+			a.terminalOutput = append(a.terminalOutput, "")
+			if msg.Err != nil {
+				a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process failed: %v]", msg.Err))
+			} else {
+				a.terminalOutput = append(a.terminalOutput, fmt.Sprintf("[Process exited with code %d]", msg.ExitCode))
+			}
 		}
+
+		// Reset the killed flag for next execution
+		a.processKilled = false
+
 		if a.terminalMode {
 			a.viewModeScroll = len(a.terminalOutput)
 		}
@@ -617,6 +633,9 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 // If cwd is empty, falls back to a.workingDir.
 func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 	outChan := make(chan tea.Msg)
+
+	// Reset the killed flag for new execution
+	a.processKilled = false
 
 	// Determine effective working directory
 	effectiveDir := cwd
@@ -669,6 +688,9 @@ func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 			cmd.Dir = effectiveDir
 		}
 
+		// Store the running command so it can be killed with Ctrl+K
+		a.runningCmd = cmd
+
 		stdin, _ := cmd.StdinPipe()
 		stdout, _ := cmd.StdoutPipe()
 		stderr, _ := cmd.StderrPipe()
@@ -676,6 +698,7 @@ func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 		a.stdinWriter = stdin
 
 		if err := cmd.Start(); err != nil {
+			a.runningCmd = nil
 			outChan <- TerminalDoneMsg{Err: err}
 			return
 		}
@@ -718,6 +741,7 @@ func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 			}
 		}
 		a.stdinWriter = nil
+		a.runningCmd = nil
 		outChan <- TerminalDoneMsg{ExitCode: exitCode, Err: err}
 	}()
 
@@ -858,6 +882,38 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		// When a command is running in terminal mode, forward input to the process
 		if a.terminalMode && a.cmdRunning && a.stdinWriter != nil {
 			switch keyStr {
+			case "ctrl+k":
+				// Kill the running process
+				if a.runningCmd != nil && a.runningCmd.Process != nil {
+					// Set flag to ignore further output
+					a.processKilled = true
+					// Close stdin first
+					if a.stdinWriter != nil {
+						a.stdinWriter.Close()
+					}
+
+					// Kill the process tree (important on Windows to kill child processes)
+					pid := a.runningCmd.Process.Pid
+					if runtime.GOOS == "windows" {
+						// On Windows, use taskkill to kill the entire process tree
+						killCmd := exec.Command("taskkill", "/F", "/T", "/PID", fmt.Sprintf("%d", pid))
+						killCmd.Run()
+					} else {
+						// On Unix, just kill the process
+						a.runningCmd.Process.Kill()
+					}
+
+					// Mark as not running
+					a.cmdRunning = false
+					a.terminalOutput = append(a.terminalOutput, "", "[Process killed by user (Ctrl+K)]")
+					a.viewModeScroll = len(a.terminalOutput)
+
+					// Return a command to clear the status message in the app
+					return func() tea.Msg {
+						return ClearStatusMsg{}
+					}
+				}
+				return nil
 			case "esc":
 				// Esc always exits — close stdin and let the process finish
 				a.stdinWriter.Close()
@@ -1626,7 +1682,7 @@ func (a *AIChatPane) renderViewMode() string {
 				MarginBottom(1).
 				Padding(0, 1).
 				Width(a.width - 4).
-				Render(" ⚙  [Enter] Send Input  |  [Esc] Close Stdin  |  [↑↓/PgUp/PgDn] Scroll ")
+				Render(" ⚙  [Enter] Send Input  |  [Ctrl+K] Kill Process  |  [Esc] Close Stdin  |  [↑↓/PgUp/PgDn] Scroll ")
 		} else {
 			instructions = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("15")).
@@ -1918,7 +1974,7 @@ func (a *AIChatPane) GetLastAssistantResponse() string {
 
 // RunScript enters terminal mode and executes the given command, streaming
 // output into the AI chat pane. Returns a tea.Cmd to start the execution.
-func (a *AIChatPane) RunScript(command string, label string) tea.Cmd {
+func (a *AIChatPane) RunScript(command string, label string, workingDir string) tea.Cmd {
 	if a.cmdRunning {
 		return nil
 	}
@@ -1937,7 +1993,7 @@ func (a *AIChatPane) RunScript(command string, label string) tea.Cmd {
 	}
 	a.viewModeScroll = 0
 
-	return a.executeCommand(command, "")
+	return a.executeCommand(command, workingDir)
 }
 
 // EnterConfigMode enters the configuration editor mode.
