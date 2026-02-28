@@ -14,19 +14,19 @@ func TestCommandExecutor_ExecuteCommand(t *testing.T) {
 	ce := executor.NewCommandExecutor()
 
 	tests := []struct {
-		name         string
-		command      string
-		cwd          string
-		expectError  bool
-		checkStdout  bool
+		name           string
+		command        string
+		cwd            string
+		expectError    bool
+		checkStdout    bool
 		stdoutContains string
 	}{
 		{
-			name:         "simple echo command",
-			command:      "echo hello",
-			cwd:          "",
-			expectError:  false,
-			checkStdout:  true,
+			name:           "simple echo command",
+			command:        "echo hello",
+			cwd:            "",
+			expectError:    false,
+			checkStdout:    true,
 			stdoutContains: "hello",
 		},
 		{
@@ -40,7 +40,7 @@ func TestCommandExecutor_ExecuteCommand(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ce.ExecuteCommand(tt.command, tt.cwd)
-			
+
 			if (err != nil) != tt.expectError {
 				t.Errorf("ExecuteCommand() error = %v, expectError %v", err, tt.expectError)
 				return
@@ -154,7 +154,7 @@ func TestCommandExecutor_ExecuteCommand_CommandNotFound(t *testing.T) {
 	ce := executor.NewCommandExecutor()
 
 	result, err := ce.ExecuteCommand("nonexistentcommand12345", "")
-	
+
 	// Should return an error because command doesn't exist
 	if err == nil && result != nil && result.ExitCode == 0 {
 		t.Errorf("Expected error or non-zero exit code for non-existent command")
@@ -165,13 +165,13 @@ func TestCommandExecutor_GetInterpreter(t *testing.T) {
 	ce := executor.NewCommandExecutor()
 
 	tests := []struct {
-		name           string
-		scriptPath     string
+		name                string
+		scriptPath          string
 		expectedInterpreter string
 	}{
 		{
-			name:           "bash script with .sh extension",
-			scriptPath:     "script.sh",
+			name:       "bash script with .sh extension",
+			scriptPath: "script.sh",
 			expectedInterpreter: func() string {
 				if runtime.GOOS == "windows" {
 					return "sh"
@@ -180,13 +180,13 @@ func TestCommandExecutor_GetInterpreter(t *testing.T) {
 			}(),
 		},
 		{
-			name:           "bash script with .bash extension",
-			scriptPath:     "script.bash",
+			name:                "bash script with .bash extension",
+			scriptPath:          "script.bash",
 			expectedInterpreter: "bash",
 		},
 		{
-			name:           "PowerShell script",
-			scriptPath:     "script.ps1",
+			name:       "PowerShell script",
+			scriptPath: "script.ps1",
 			expectedInterpreter: func() string {
 				if runtime.GOOS == "windows" {
 					return "powershell"
@@ -195,18 +195,18 @@ func TestCommandExecutor_GetInterpreter(t *testing.T) {
 			}(),
 		},
 		{
-			name:           "unsupported extension",
-			scriptPath:     "script.py",
+			name:                "unsupported extension",
+			scriptPath:          "script.txt",
 			expectedInterpreter: "",
 		},
 		{
-			name:           "no extension",
-			scriptPath:     "script",
+			name:                "no extension",
+			scriptPath:          "script",
 			expectedInterpreter: "",
 		},
 		{
-			name:           "uppercase extension",
-			scriptPath:     "SCRIPT.SH",
+			name:       "uppercase extension",
+			scriptPath: "SCRIPT.SH",
 			expectedInterpreter: func() string {
 				if runtime.GOOS == "windows" {
 					return "sh"
@@ -238,7 +238,7 @@ func TestCommandExecutor_ExecuteScript(t *testing.T) {
 
 		scriptPath := filepath.Join(tmpDir, "test.sh")
 		scriptContent := "#!/bin/bash\necho 'Hello from bash'\nexit 0"
-		
+
 		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 			t.Fatalf("Failed to create test script: %v", err)
 		}
@@ -266,7 +266,7 @@ func TestCommandExecutor_ExecuteScript(t *testing.T) {
 
 		scriptPath := filepath.Join(tmpDir, "fail.sh")
 		scriptContent := "#!/bin/bash\nexit 42"
-		
+
 		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 			t.Fatalf("Failed to create test script: %v", err)
 		}
@@ -283,9 +283,9 @@ func TestCommandExecutor_ExecuteScript(t *testing.T) {
 	})
 
 	t.Run("execute unsupported script type", func(t *testing.T) {
-		scriptPath := filepath.Join(tmpDir, "test.py")
+		scriptPath := filepath.Join(tmpDir, "test.txt")
 		scriptContent := "print('Hello')"
-		
+
 		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 			t.Fatalf("Failed to create test script: %v", err)
 		}
@@ -298,7 +298,7 @@ func TestCommandExecutor_ExecuteScript(t *testing.T) {
 
 	t.Run("execute non-existent script", func(t *testing.T) {
 		scriptPath := filepath.Join(tmpDir, "nonexistent.sh")
-		
+
 		result, err := ce.ExecuteScript(scriptPath)
 		// Either we get an error (script doesn't exist) or non-zero exit code
 		if err == nil && result != nil && result.ExitCode == 0 {
@@ -318,7 +318,7 @@ func TestCommandExecutor_ExecuteScript_StderrCapture(t *testing.T) {
 
 	scriptPath := filepath.Join(tmpDir, "stderr.sh")
 	scriptContent := "#!/bin/bash\necho 'error message' >&2\nexit 1"
-	
+
 	if err := os.WriteFile(scriptPath, []byte(scriptContent), 0755); err != nil {
 		t.Fatalf("Failed to create test script: %v", err)
 	}
@@ -395,7 +395,7 @@ func TestCommandExecutor_CommandNotFoundScenario(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := ce.ExecuteCommand(tt.command, "")
-			
+
 			// Command not found should either return an error or non-zero exit code
 			if err == nil && result != nil {
 				if result.ExitCode == 0 {
@@ -421,12 +421,12 @@ func TestCommandExecutor_PermissionDeniedScenario(t *testing.T) {
 	}
 
 	tmpDir := t.TempDir()
-	
+
 	t.Run("execute non-executable script", func(t *testing.T) {
 		// Create a script without execute permissions
 		scriptPath := filepath.Join(tmpDir, "no_exec.sh")
 		scriptContent := "#!/bin/bash\necho 'This should not run'"
-		
+
 		if err := os.WriteFile(scriptPath, []byte(scriptContent), 0644); err != nil {
 			t.Fatalf("Failed to create test script: %v", err)
 		}
@@ -435,12 +435,12 @@ func TestCommandExecutor_PermissionDeniedScenario(t *testing.T) {
 		// This should fail because the file doesn't have execute permissions
 		cmd := scriptPath
 		result, err := ce.ExecuteCommand(cmd, "")
-		
+
 		// Should fail due to permission denied
 		if err == nil && result != nil && result.ExitCode == 0 {
 			t.Errorf("Expected error or non-zero exit code for non-executable script")
 		}
-		
+
 		// Note: ExecuteScript will still work because it calls bash with the script path
 		// which doesn't require execute permissions on the script file itself
 	})
@@ -456,7 +456,7 @@ func TestCommandExecutor_PermissionDeniedScenario(t *testing.T) {
 		// Try to write to the read-only directory
 		cmd := "touch " + filepath.Join(readOnlyDir, "test.txt")
 		result, err := ce.ExecuteCommand(cmd, "")
-		
+
 		// Should fail due to permission denied
 		if err == nil && result != nil && result.ExitCode == 0 {
 			t.Errorf("Expected error or non-zero exit code for writing to read-only directory")
@@ -474,7 +474,7 @@ func TestCommandExecutor_PermissionDeniedScenario(t *testing.T) {
 		// Try to read the protected file
 		cmd := "cat " + protectedFile
 		result, err := ce.ExecuteCommand(cmd, "")
-		
+
 		// Should fail due to permission denied
 		if err == nil && result != nil && result.ExitCode == 0 {
 			t.Errorf("Expected error or non-zero exit code for reading protected file")

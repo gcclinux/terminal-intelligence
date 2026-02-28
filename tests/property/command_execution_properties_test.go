@@ -170,9 +170,9 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 		func(filename string) bool {
 			ce := executor.NewCommandExecutor()
 			scriptPath := filename + ".sh"
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			// On Windows, .sh files should use "sh"
 			// On Unix systems, .sh files should use "bash"
 			if runtime.GOOS == "windows" {
@@ -187,9 +187,9 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 		func(filename string) bool {
 			ce := executor.NewCommandExecutor()
 			scriptPath := filename + ".bash"
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			return interpreter == "bash"
 		},
 		gen.Identifier(),
@@ -199,9 +199,9 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 		func(filename string) bool {
 			ce := executor.NewCommandExecutor()
 			scriptPath := filename + ".ps1"
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			// On Windows, .ps1 files should use "powershell"
 			// On Unix systems, .ps1 files should use "pwsh" (PowerShell Core)
 			if runtime.GOOS == "windows" {
@@ -215,22 +215,22 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 	properties.Property("unsupported extensions return empty string", prop.ForAll(
 		func(filename string, ext string) bool {
 			ce := executor.NewCommandExecutor()
-			
-			// Use extensions that are not .sh, .bash, or .ps1
+
+			// Use extensions that are not supported script runners
 			scriptPath := filename + "." + ext
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			return interpreter == ""
 		},
 		gen.Identifier(),
-		gen.OneConstOf("txt", "py", "js", "go", "md", "json", "xml"),
+		gen.OneConstOf("txt", "js", "md", "json", "xml", "html"),
 	))
 
 	properties.Property("case insensitive extension matching", prop.ForAll(
 		func(filename string, caseVariant int) bool {
 			ce := executor.NewCommandExecutor()
-			
+
 			// Test different case variants of .sh extension
 			var scriptPath string
 			switch caseVariant % 4 {
@@ -243,9 +243,9 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 			case 3:
 				scriptPath = filename + ".sH"
 			}
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			// Should still recognize the extension regardless of case
 			if runtime.GOOS == "windows" {
 				return interpreter == "sh"
@@ -259,12 +259,12 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 	properties.Property("paths with directories handled correctly", prop.ForAll(
 		func(dir string, filename string, ext string) bool {
 			ce := executor.NewCommandExecutor()
-			
+
 			// Create a path with directory components
 			scriptPath := dir + "/" + filename + ext
-			
+
 			interpreter := ce.GetInterpreter(scriptPath)
-			
+
 			// Verify interpreter is selected based on extension, not path
 			switch ext {
 			case ".sh":
@@ -279,13 +279,17 @@ func TestProperty_ScriptInterpreterSelection(t *testing.T) {
 					return interpreter == "powershell"
 				}
 				return interpreter == "pwsh"
+			case ".py":
+				return interpreter == "python3"
+			case ".go":
+				return interpreter == "go"
 			default:
 				return interpreter == ""
 			}
 		},
 		gen.Identifier(),
 		gen.Identifier(),
-		gen.OneConstOf(".sh", ".bash", ".ps1", ".txt", ".py"),
+		gen.OneConstOf(".sh", ".bash", ".ps1", ".txt", ".py", ".go"),
 	))
 
 	properties.TestingRun(t, gopter.ConsoleReporter(false))

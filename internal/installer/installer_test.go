@@ -50,8 +50,8 @@ func TestGetGoInstallCommand(t *testing.T) {
 			t.Errorf("Unexpected command: %s", command)
 		}
 	case "linux":
-		if packageManager != "manual" {
-			t.Errorf("Expected manual on Linux, got %s", packageManager)
+		if packageManager != "direct" {
+			t.Errorf("Expected direct on Linux, got %s", packageManager)
 		}
 	default:
 		t.Logf("Unknown OS: %s", runtime.GOOS)
