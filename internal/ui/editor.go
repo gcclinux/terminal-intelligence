@@ -738,6 +738,7 @@ func (e *EditorPane) deleteWord() {
 }
 
 // adjustScroll adjusts the scroll offset to keep cursor visible.
+// Accounts for line wrapping.
 // Scrolls down if cursor is below visible area.
 // Scrolls up if cursor is above visible area.
 // Ensures scroll offset is never negative.
@@ -747,14 +748,56 @@ func (e *EditorPane) adjustScroll() {
 		visibleLines = 1
 	}
 
+	maxLineWidth := e.width - 12
+	if maxLineWidth < 10 {
+		maxLineWidth = 10
+	}
+
+	lines := strings.Split(e.content, "\n")
+
+	// Calculate visual line position of cursor
+	cursorVisualLine := 0
+	for i := 0; i <= e.cursorLine && i < len(lines); i++ {
+		rawLine := lines[i]
+		expanded := strings.ReplaceAll(rawLine, "\t", "    ")
+		runes := []rune(expanded)
+		lineLen := len(runes)
+
+		if lineLen == 0 {
+			if i == e.cursorLine {
+				break
+			}
+			cursorVisualLine++
+			continue
+		}
+
+		chunks := (lineLen + maxLineWidth - 1) / maxLineWidth
+		if chunks == 0 {
+			chunks = 1
+		}
+
+		if i == e.cursorLine {
+			col := e.cursorCol
+			if col > len(rawLine) {
+				col = len(rawLine)
+			}
+			prefix := strings.ReplaceAll(rawLine[:col], "\t", "    ")
+			expandedCol := len([]rune(prefix))
+			cursorVisualLine += expandedCol / maxLineWidth
+			break
+		} else {
+			cursorVisualLine += chunks
+		}
+	}
+
 	// Scroll down if cursor is below visible area
-	if e.cursorLine >= e.scrollOffset+visibleLines {
-		e.scrollOffset = e.cursorLine - visibleLines + 1
+	if cursorVisualLine >= e.scrollOffset+visibleLines {
+		e.scrollOffset = cursorVisualLine - visibleLines + 1
 	}
 
 	// Scroll up if cursor is above visible area
-	if e.cursorLine < e.scrollOffset {
-		e.scrollOffset = e.cursorLine
+	if cursorVisualLine < e.scrollOffset {
+		e.scrollOffset = cursorVisualLine
 	}
 
 	// Ensure scroll offset is not negative
@@ -769,7 +812,7 @@ func (e *EditorPane) adjustScroll() {
 // Rendering details:
 //   - Line numbers: 3-digit format, gray color
 //   - Cursor: Reverse video on current character (or space at end of line)
-//   - Long lines: Truncated with "..." to prevent wrapping
+//   - Long lines: Wrapped visually to prevent horizontal scrolling
 //   - Empty lines below content: Shown as "~" (vim-style)
 //   - Border: Blue when focused, gray when unfocused
 //
@@ -785,8 +828,6 @@ func (e *EditorPane) View() string {
 	if visibleLines < 1 {
 		visibleLines = 1
 	}
-
-	totalLines := len(lines)
 
 	// Calculate max line width to prevent wrapping
 	// Available space:
@@ -805,36 +846,101 @@ func (e *EditorPane) View() string {
 		maxLineWidth = 10
 	}
 
+	// Build all visual lines
+	type visualLine struct {
+		fileLineIdx    int
+		text           string
+		isContinuation bool
+		isCursorChunk  bool
+		cursorRelCol   int
+	}
+	var vLines []visualLine
+
+	for fileLineIdx, rawLine := range lines {
+		expanded := strings.ReplaceAll(rawLine, "\t", "    ")
+		runes := []rune(expanded)
+		lineLen := len(runes)
+
+		if lineLen == 0 {
+			vLines = append(vLines, visualLine{
+				fileLineIdx:    fileLineIdx,
+				text:           "",
+				isContinuation: false,
+				isCursorChunk:  fileLineIdx == e.cursorLine,
+				cursorRelCol:   0,
+			})
+			continue
+		}
+
+		for start := 0; start < lineLen; start += maxLineWidth {
+			end := start + maxLineWidth
+			if end > lineLen {
+				end = lineLen
+			}
+			chunk := string(runes[start:end])
+
+			isCursorChunk := false
+			relCol := -1
+			if fileLineIdx == e.cursorLine {
+				col := e.cursorCol
+				if col > len(rawLine) {
+					col = len(rawLine)
+				}
+				prefix := strings.ReplaceAll(rawLine[:col], "\t", "    ")
+				expandedCol := len([]rune(prefix))
+
+				if expandedCol >= start && (expandedCol < end || (expandedCol == end && end == lineLen)) {
+					isCursorChunk = true
+					relCol = expandedCol - start
+				}
+			}
+
+			vLines = append(vLines, visualLine{
+				fileLineIdx:    fileLineIdx,
+				text:           chunk,
+				isContinuation: start > 0,
+				isCursorChunk:  isCursorChunk,
+				cursorRelCol:   relCol,
+			})
+		}
+	}
+
 	// Render exactly visibleLines lines
 	var renderedLines []string
 	for i := 0; i < visibleLines; i++ {
-		fileLineIdx := e.scrollOffset + i
+		vIdx := e.scrollOffset + i
 
-		if fileLineIdx < totalLines {
-			lineNum := fileLineIdx + 1
-			lineNumStr := fmt.Sprintf("%3d", lineNum)
-			lineNumStyled := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("240")).
-				Render(lineNumStr)
+		if vIdx < len(vLines) {
+			vl := vLines[vIdx]
 
-			line := lines[fileLineIdx]
-
-			// Truncate long lines to strictly prevent wrapping
-			if len(line) > maxLineWidth {
-				line = line[:maxLineWidth-3] + "..."
+			var lineNumStyled string
+			if !vl.isContinuation {
+				lineNumStr := fmt.Sprintf("%3d", vl.fileLineIdx+1)
+				lineNumStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(lineNumStr)
+			} else {
+				lineNumStyled = lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("   ")
 			}
 
-			// Highlight cursor line
-			if fileLineIdx == e.cursorLine && e.focused {
+			line := vl.text
+
+			// Fill the chunk to maxLineWidth so that it doesn't shorten the container border
+			runeLine := []rune(line)
+			if len(runeLine) < maxLineWidth {
+				line += strings.Repeat(" ", maxLineWidth-len(runeLine))
+			}
+
+			// Highlight cursor chunk
+			if vl.isCursorChunk && e.focused {
 				cursorStyle := lipgloss.NewStyle().Reverse(true)
-				if e.cursorCol < len(line) {
-					line = line[:e.cursorCol] + cursorStyle.Render(string(line[e.cursorCol])) + line[e.cursorCol+1:]
+				runeLine = []rune(line) // re-evaluate after padding
+				if vl.cursorRelCol < len(runeLine) {
+					line = string(runeLine[:vl.cursorRelCol]) + cursorStyle.Render(string(runeLine[vl.cursorRelCol])) + string(runeLine[vl.cursorRelCol+1:])
 				} else {
 					line += cursorStyle.Render(" ")
 				}
 			}
 
-			if color, ok := e.diffMarkers[fileLineIdx]; ok {
+			if color, ok := e.diffMarkers[vl.fileLineIdx]; ok {
 				if color == "red" {
 					line = lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render(line)
 				} else if color == "green" {
@@ -844,7 +950,9 @@ func (e *EditorPane) View() string {
 
 			renderedLines = append(renderedLines, lineNumStyled+" │ "+line)
 		} else {
-			renderedLines = append(renderedLines, "  ~")
+			// Ensure empty lines have the appropriate width padding to match content lines
+			emptyLine := "  ~" + strings.Repeat(" ", maxLineWidth+2) // 2 for the space+pipe padding
+			renderedLines = append(renderedLines, emptyLine)
 		}
 	}
 

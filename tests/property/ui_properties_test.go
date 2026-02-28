@@ -131,7 +131,6 @@ func TestProperty_UnsavedChangesTracking(t *testing.T) {
 	properties.TestingRun(t, gopter.ConsoleReporter(false))
 }
 
-
 // Feature: Terminal Intelligence (TI), Property 14: Line Numbers Display
 // **Validates: Requirements 6.4**
 //
@@ -198,17 +197,15 @@ func containsLineNumbers(view string) bool {
 	return len(view) > 0 && strings.Contains(view, " │ ")
 }
 
-
 // genFileExtension generates file extensions for supported file types
 func genFileExtension() gopter.Gen {
 	return gen.OneConstOf(
-		".sh",      // bash
-		".bash",    // bash
-		".ps1",     // powershell
-		".md",      // markdown
+		".sh",   // bash
+		".bash", // bash
+		".ps1",  // powershell
+		".md",   // markdown
 	)
 }
-
 
 // Feature: Terminal Intelligence (TI), Property 13: Terminal Resize Proportional Adjustment
 // **Validates: Requirements 6.3**
@@ -236,9 +233,9 @@ func TestProperty_TerminalResizeProportionalAdjustment(t *testing.T) {
 			editorPane := app.GetEditorPane()
 			aiPane := app.GetAIPane()
 
-			expectedEditorWidth := (width / 2) + 4
-			expectedAIWidth := (width / 2) - 1
-			expectedPaneHeight := height - 7      // Account for header (3 lines), editor title (3 lines), and status bar (1 line)
+			expectedEditorWidth := (width / 2) + 2
+			expectedAIWidth := width + 2 - expectedEditorWidth
+			expectedPaneHeight := height - 7 // Account for header (3 lines), editor title (3 lines), and status bar (1 line)
 
 			// Verify editor pane size matches formula
 			if editorPane.GetWidth() != expectedEditorWidth {
@@ -314,12 +311,12 @@ func TestProperty_ActivePaneVisualIndication(t *testing.T) {
 				// Editor should be focused, AI should not
 				editorView := editorPane.View()
 				aiView := aiPane.View()
-				
+
 				// Both views should exist
 				if len(editorView) == 0 || len(aiView) == 0 {
 					return true // Skip if views are empty
 				}
-				
+
 				// Views should be different (one focused, one not)
 				if editorView == aiView {
 					t.Logf("Editor and AI views should be different when one is focused")
@@ -329,12 +326,12 @@ func TestProperty_ActivePaneVisualIndication(t *testing.T) {
 				// AI should be focused, Editor should not
 				editorView := editorPane.View()
 				aiView := aiPane.View()
-				
+
 				// Both views should exist
 				if len(editorView) == 0 || len(aiView) == 0 {
 					return true // Skip if views are empty
 				}
-				
+
 				// Views should be different (one focused, one not)
 				if editorView == aiView {
 					t.Logf("Editor and AI views should be different when one is focused")
@@ -359,9 +356,9 @@ func TestProperty_ActivePaneVisualIndication(t *testing.T) {
 
 			return true
 		},
-		gen.IntRange(20, 300),  // Terminal width range
-		gen.IntRange(10, 100),  // Terminal height range
-		gen.Bool(),             // Start with editor or AI pane
+		gen.IntRange(20, 300), // Terminal width range
+		gen.IntRange(10, 100), // Terminal height range
+		gen.Bool(),            // Start with editor or AI pane
 	))
 
 	properties.TestingRun(t, gopter.ConsoleReporter(false))

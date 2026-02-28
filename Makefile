@@ -2,7 +2,7 @@
 
 # Variables
 BINARY_NAME=ti
-VERSION=0.0.1.7
+VERSION=0.0.2.1
 BUILD_DIR=build
 GO=go
 BUILD_NUMBER=$(shell printf "%04d" $$(($(shell git rev-list --count HEAD 2>/dev/null || echo "0") + 1)))
