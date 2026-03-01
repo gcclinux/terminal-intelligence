@@ -2,10 +2,13 @@
 
 A lightweight CLI-based IDE with integrated AI assistance through Ollama. Features a split-window terminal interface with an integrated code editor and AI assistant for creating, editing, and testing scripts and markdown documents.
 
-![Terminal Intelligence Preview](images/ti-4th-b-view.png)
+### Menu View & Shotcuts
+Quick overview of current menu shotcuts and key combinations
+
+![TI Help Menu](images/menu-guide.png)
 ---
 
-[**Additional Screenshot Showcase →**](SHOWCASE.md)
+# [**Additional Screenshot Showcase →**](SHOWCASE.md)
 
 ## Features
 

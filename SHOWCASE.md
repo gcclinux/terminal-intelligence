@@ -4,6 +4,11 @@ This document showcases the various features and views of Terminal Intelligence 
 
 ## Main Interface Views
 
+### Menu View & Shotcuts
+Quick overview of current menu shotcuts and key combinations
+
+![TI Help Menu](images/menu-guide.png)
+
 ### First View - Split Window Interface
 The main split-window interface showing the code editor on the left and AI assistant on the right.
 

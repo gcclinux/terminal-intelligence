@@ -70,7 +70,6 @@ type App struct {
 	showBackupPicker          bool                      // Whether backup picker dialog is showing
 	showChatLoader            bool                      // Whether chat loader dialog is showing
 	showHelp                  bool                      // Whether help dialog is showing
-	showEditorHelp            bool                      // Whether editor shortcuts dialog is showing
 	showLanguageInstallPrompt bool                      // Whether language install prompt is showing
 	languageToInstall         string                    // Language name for installation prompt
 	fileTypeForInstall        string                    // File type that triggered install check
@@ -493,15 +492,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
-		// Handle editor shortcuts dialog
-		if a.showEditorHelp {
-			switch msg.String() {
-			case "esc", "ctrl+e", "q":
-				a.showEditorHelp = false
-			}
-			return a, nil
-		}
-
 		// Handle file picker dialog
 		if a.showFilePicker {
 			switch msg.String() {
@@ -842,11 +832,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+h":
 			// Toggle help menu
 			a.showHelp = !a.showHelp
-			return a, nil
-
-		case "ctrl+e":
-			// Toggle editor shortcuts help
-			a.showEditorHelp = !a.showEditorHelp
 			return a, nil
 
 		case "ctrl+a":
@@ -1337,11 +1322,6 @@ func (a *App) View() string {
 	// Show help dialog if needed
 	if a.showHelp {
 		return a.renderHelpDialog()
-	}
-
-	// Show editor shortcuts dialog if needed
-	if a.showEditorHelp {
-		return a.renderEditorHelpDialog()
 	}
 
 	// Show chat loader dialog if needed
