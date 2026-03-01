@@ -205,6 +205,18 @@ func (fm *FileManager) FileExists(filePath string) bool {
 func (fm *FileManager) ListFiles() ([]string, error) {
 	var files []string
 
+	// Image extensions to exclude
+	imageExts := map[string]bool{
+		".ico":  true,
+		".png":  true,
+		".jpg":  true,
+		".jpeg": true,
+		".bmp":  true,
+		".gif":  true,
+		".svg":  true,
+		".webp": true,
+	}
+
 	err := filepath.Walk(fm.workspaceDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -215,6 +227,12 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 			if info.IsDir() && filepath.Base(path)[0] == '.' {
 				return filepath.SkipDir
 			}
+			return nil
+		}
+
+		// Skip image files
+		ext := strings.ToLower(filepath.Ext(path))
+		if imageExts[ext] {
 			return nil
 		}
 

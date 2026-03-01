@@ -100,6 +100,14 @@ func (a *App) renderHelpDialog() string {
 	rightColumn += keyStyle.Render("  Enter") + descStyle.Render("         Insert new line") + "\n"
 	rightColumn += keyStyle.Render("  Backspace") + descStyle.Render("     Delete char before cursor") + "\n"
 	rightColumn += keyStyle.Render("  Delete") + descStyle.Render("        Delete char at cursor") + "\n"
+	rightColumn += "\n"
+
+	// Git Operations
+	rightColumn += sectionStyle.Render("── Git Operations ────────────────────────────") + "\n"
+	rightColumn += keyStyle.Render("  Ctrl+G") + descStyle.Render("        Open Git Panel") + "\n"
+	rightColumn += keyStyle.Render("  ↑↓") + descStyle.Render("            Navigate options") + "\n"
+	rightColumn += keyStyle.Render("  Enter") + descStyle.Render("         Select operation") + "\n"
+	rightColumn += keyStyle.Render("  Esc") + descStyle.Render("           Close Git Panel") + "\n"
 
 	// Style both columns
 	columnStyle := lipgloss.NewStyle().

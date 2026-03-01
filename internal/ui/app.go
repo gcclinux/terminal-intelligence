@@ -1489,7 +1489,7 @@ func (a *App) View() string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(lipgloss.Color("62")).
 			Padding(1, 2).
-			Width(60).
+			Width(80).
 			Align(lipgloss.Left)
 
 		// Styles for file list
