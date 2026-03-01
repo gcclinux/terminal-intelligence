@@ -4,6 +4,37 @@ This document showcases the various features and views of Terminal Intelligence 
 
 ## Main Interface Views
 
+### Git Operations
+Terminal Intelligence provides integrated Git operations through an intuitive panel interface.
+
+#### Git Status
+View the current status of your repository, including modified, staged, and untracked files.
+
+![Git Status](images/git-status.png)
+
+---
+
+#### Git Stage
+Stage files for commit with a single button press.
+
+![Git Stage](images/git-stage.png)
+
+---
+
+#### Git Commit
+Commit your staged changes with a custom message.
+
+![Git Commit](images/git-commit.png)
+
+---
+
+#### Git Push
+Push your commits to the remote repository.
+
+![Git Push](images/git-push.png)
+
+---
+
 ### Menu View & Shotcuts
 Quick overview of current menu shotcuts and key combinations
 
