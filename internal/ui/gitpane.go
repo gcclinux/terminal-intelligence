@@ -25,13 +25,14 @@ type GitPane struct {
 	height  int  // Height of the terminal window
 
 	// Input focus management
-	// focusedInput: 0=URL, 1=USER, 2=PASS, 3=buttons
+	// focusedInput: 0=URL, 1=USER, 2=PASS, 3=buttons, 4=commit message
 	focusedInput int
 
 	// Input fields (using textinput from bubbletea)
-	urlInput  textinput.Model // Input field for Git repository URL
-	userInput textinput.Model // Input field for Git username
-	passInput textinput.Model // Input field for Git password or GitHub PAT (ghp_*)
+	urlInput       textinput.Model // Input field for Git repository URL
+	userInput      textinput.Model // Input field for Git username
+	passInput      textinput.Model // Input field for Git password or GitHub PAT (ghp_*)
+	commitMsgInput textinput.Model // Input field for commit message (only shown when Commit is selected)
 
 	// Button state
 	// selectedButton: 0=Clone, 1=Pull, 2=Fetch, 3=Stage, 4=Commit, 5=Push, 6=Status, 7=Restore
@@ -95,6 +96,13 @@ func (g *GitPane) Init() tea.Cmd {
 	g.passInput.Width = 60
 	g.passInput.EchoMode = textinput.EchoPassword // Hide password input
 	g.passInput.EchoCharacter = '•'
+
+	// Initialize commit message input field
+	g.commitMsgInput = textinput.New()
+	g.commitMsgInput.Placeholder = "Enter commit message"
+	g.commitMsgInput.Prompt = "Commit Message: "
+	g.commitMsgInput.CharLimit = 200
+	g.commitMsgInput.Width = 60
 
 	// Set initial focus to URL input
 	g.urlInput.Focus()
@@ -527,18 +535,29 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return g, nil
 
 		case "tab", "down":
-			// Tab or Down moves focus forward: URL → USER → PASS → buttons
+			// Tab or Down moves focus forward: URL → USER → PASS → buttons (→ commit msg if Commit selected)
 			g.focusedInput++
-			if g.focusedInput > 3 {
+			// If Commit button is selected and we're at buttons, move to commit message input
+			if g.focusedInput == 4 && g.selectedButton == 4 {
+				// Allow moving to commit message input
+			} else if g.focusedInput > 3 {
+				// Skip commit message input if not on Commit button
 				g.focusedInput = 0
 			}
 			g.updateFocus()
 
 		case "shift+tab", "up":
-			// Shift+Tab or Up moves focus backward: buttons → PASS → USER → URL
+			// Shift+Tab or Up moves focus backward
 			g.focusedInput--
 			if g.focusedInput < 0 {
-				g.focusedInput = 3
+				// If Commit button is selected, go to commit message input
+				if g.selectedButton == 4 {
+					g.focusedInput = 4
+				} else {
+					g.focusedInput = 3
+				}
+			} else if g.focusedInput == 3 && g.selectedButton == 4 {
+				// Coming from commit message, stay at buttons
 			}
 			g.updateFocus()
 
@@ -555,6 +574,14 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				username := g.userInput.Value()
 				password := g.passInput.Value()
 				
+				// For Commit button, check if we need to show commit message input
+				if g.selectedButton == 4 {
+					// Move focus to commit message input
+					g.focusedInput = 4
+					g.updateFocus()
+					return g, nil
+				}
+				
 				// Trigger the appropriate Git operation based on selected button
 				switch g.selectedButton {
 				case 0: // Clone
@@ -565,8 +592,6 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return g, g.executeFetch(username, password)
 				case 3: // Stage
 					return g, g.executeStage()
-				case 4: // Commit
-					return g, g.executeCommit("Update files")
 				case 5: // Push
 					return g, g.executePush(username, password)
 				case 6: // Status
@@ -575,6 +600,18 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return g, g.executeRestore()
 				}
 				return g, nil
+			} else if g.focusedInput == 4 {
+				// Focused on commit message input - execute commit
+				commitMsg := g.commitMsgInput.Value()
+				if commitMsg == "" {
+					g.errorMessage = "Commit message cannot be empty"
+					return g, nil
+				}
+				// Clear the commit message input and go back to buttons
+				g.commitMsgInput.SetValue("")
+				g.focusedInput = 3
+				g.updateFocus()
+				return g, g.executeCommit(commitMsg)
 			}
 			// If focused on input field, Enter does nothing (use Tab/Down to move)
 
@@ -592,13 +629,18 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						g.selectedButton = 0 // Wrap to first button (Clone)
 					}
 				}
+				// If we moved away from Commit button, reset focus if on commit message
+				if g.selectedButton != 4 && g.focusedInput == 4 {
+					g.focusedInput = 3
+					g.updateFocus()
+				}
 			}
 		}
 	}
 
 	// Update the focused input field with keyboard input
 	// Only update if we're focused on an input field (not buttons)
-	if g.focusedInput < 3 {
+	if g.focusedInput < 3 || g.focusedInput == 4 {
 		switch g.focusedInput {
 		case 0:
 			g.urlInput, cmd = g.urlInput.Update(msg)
@@ -606,6 +648,8 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			g.userInput, cmd = g.userInput.Update(msg)
 		case 2:
 			g.passInput, cmd = g.passInput.Update(msg)
+		case 4:
+			g.commitMsgInput, cmd = g.commitMsgInput.Update(msg)
 		}
 	}
 
@@ -619,6 +663,7 @@ func (g *GitPane) updateFocus() {
 	g.urlInput.Blur()
 	g.userInput.Blur()
 	g.passInput.Blur()
+	g.commitMsgInput.Blur()
 
 	// Focus the appropriate input field
 	switch g.focusedInput {
@@ -630,6 +675,8 @@ func (g *GitPane) updateFocus() {
 		g.passInput.Focus()
 	case 3:
 		// Focused on buttons - no input field should be focused
+	case 4:
+		g.commitMsgInput.Focus()
 	}
 }
 
@@ -711,6 +758,12 @@ func (g *GitPane) View() string {
 	
 	content.WriteString(buttonRow)
 	content.WriteString("\n\n")
+
+	// Show commit message input only when Commit button is selected
+	if g.selectedButton == 4 {
+		content.WriteString(g.commitMsgInput.View())
+		content.WriteString("\n\n")
+	}
 
 	// Status/Error messages
 	if g.isProcessing {
