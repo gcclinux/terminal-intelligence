@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 )
 
@@ -701,6 +702,95 @@ func (c *Client) Stage() (*OperationResult, error) {
 	return &OperationResult{
 		Success: true,
 		Message: message,
+		Error:   nil,
+	}, nil
+}
+
+// Commit creates a new commit with the staged changes.
+// It opens an existing repository in the working directory, gets the worktree,
+// and commits all staged changes with the provided commit message.
+//
+// Parameters:
+//   - message: The commit message
+//
+// Returns:
+//   - *OperationResult: Contains success status, commit hash, and any error
+//   - error: Any error that occurred during the operation
+//
+// The OperationResult.Message field contains the commit hash on success.
+func (c *Client) Commit(message string) (*OperationResult, error) {
+	// Open the existing repository
+	repo, err := git.PlainOpen(c.workDir)
+	if err != nil {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   categorizeError(err),
+		}, categorizeError(err)
+	}
+
+	// Get the worktree
+	worktree, err := repo.Worktree()
+	if err != nil {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   categorizeError(err),
+		}, categorizeError(err)
+	}
+
+	// Check if there are staged changes
+	status, err := worktree.Status()
+	if err != nil {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   categorizeError(err),
+		}, categorizeError(err)
+	}
+
+	// Count staged files
+	stagedCount := 0
+	for _, fileStatus := range status {
+		if fileStatus.Staging != git.Unmodified && fileStatus.Staging != git.Untracked {
+			stagedCount++
+		}
+	}
+
+	if stagedCount == 0 {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   fmt.Errorf("no changes staged for commit"),
+		}, fmt.Errorf("no changes staged for commit")
+	}
+
+	// Use default message if empty
+	if message == "" {
+		message = "Update files"
+	}
+
+	// Create the commit
+	hash, err := worktree.Commit(message, &git.CommitOptions{
+		Author: &object.Signature{
+			Name:  "Terminal Intelligence User",
+			Email: "user@terminal-intelligence.local",
+			When:  time.Now(),
+		},
+	})
+	if err != nil {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   categorizeError(err),
+		}, categorizeError(err)
+	}
+
+	// Success - return commit hash
+	resultMessage := fmt.Sprintf("Committed %d file(s): %s", stagedCount, hash.String()[:7])
+	return &OperationResult{
+		Success: true,
+		Message: resultMessage,
 		Error:   nil,
 	}, nil
 }

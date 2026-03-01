@@ -34,7 +34,7 @@ type GitPane struct {
 	passInput textinput.Model // Input field for Git password or GitHub PAT (ghp_*)
 
 	// Button state
-	// selectedButton: 0=Clone, 1=Pull, 2=Push, 3=Fetch, 4=Stage, 5=Status, 6=Restore
+	// selectedButton: 0=Clone, 1=Pull, 2=Fetch, 3=Stage, 4=Commit, 5=Push, 6=Status, 7=Restore
 	selectedButton int
 
 	// Status display
@@ -142,6 +142,11 @@ type GitFetchMsg struct {
 
 // GitStageMsg is sent when the user activates the Stage button.
 type GitStageMsg struct{}
+
+// GitCommitMsg is sent when the user activates the Commit button.
+type GitCommitMsg struct {
+	Message string
+}
 
 // GitStatusMsg is sent when the user activates the Status button.
 type GitStatusMsg struct{}
@@ -319,6 +324,19 @@ func (g *GitPane) executeStage() tea.Cmd {
 	}
 }
 
+// executeCommit triggers an async commit operation.
+// It sets the isProcessing flag and returns a command that will execute the commit
+// and send a GitCommitMsg when complete.
+func (g *GitPane) executeCommit(message string) tea.Cmd {
+	g.isProcessing = true
+	
+	return func() tea.Msg {
+		return GitCommitMsg{
+			Message: message,
+		}
+	}
+}
+
 // executeStatus triggers an async status operation.
 // It sets the isProcessing flag and returns a command that will execute the status
 // and send a GitStatusMsg when complete.
@@ -462,6 +480,18 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	case GitCommitMsg:
+		// Handle commit operation - execute async via GitClient
+		return g, func() tea.Msg {
+			result, _ := g.gitClient.Commit(msg.Message)
+			return GitOperationCompleteMsg{
+				Operation: "commit",
+				Success:   result.Success,
+				Message:   result.Message,
+				Error:     result.Error,
+			}
+		}
+
 	case GitStatusMsg:
 		// Handle status operation - execute async via GitClient
 		return g, func() tea.Msg {
@@ -531,15 +561,17 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return g, g.executeClone(url, username, password)
 				case 1: // Pull
 					return g, g.executePull(username, password)
-				case 2: // Push
-					return g, g.executePush(username, password)
-				case 3: // Fetch
+				case 2: // Fetch
 					return g, g.executeFetch(username, password)
-				case 4: // Stage
+				case 3: // Stage
 					return g, g.executeStage()
-				case 5: // Status
+				case 4: // Commit
+					return g, g.executeCommit("Update files")
+				case 5: // Push
+					return g, g.executePush(username, password)
+				case 6: // Status
 					return g, g.executeStatus()
-				case 6: // Restore
+				case 7: // Restore
 					return g, g.executeRestore()
 				}
 				return g, nil
@@ -552,11 +584,11 @@ func (g *GitPane) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.String() == "left" {
 					g.selectedButton--
 					if g.selectedButton < 0 {
-						g.selectedButton = 6 // Wrap to last button (Restore)
+						g.selectedButton = 7 // Wrap to last button (Restore)
 					}
 				} else { // "right"
 					g.selectedButton++
-					if g.selectedButton > 6 {
+					if g.selectedButton > 7 {
 						g.selectedButton = 0 // Wrap to first button (Clone)
 					}
 				}
@@ -616,7 +648,7 @@ func (g *GitPane) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("62")).
 		Padding(1, 2).
-		Width(80)
+		Width(84)
 
 	buttonStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("230")).
@@ -654,8 +686,8 @@ func (g *GitPane) View() string {
 	content.WriteString(g.passInput.View())
 	content.WriteString("\n\n")
 
-	// Buttons - distribute evenly across the panel width
-	buttonNames := []string{"Clone", "Pull", "Push", "Fetch", "Stage", "Status", "Restore"}
+	// Buttons - reordered and grouped: Clone Pull Fetch | Stage Commit Push | Status Restore
+	buttonNames := []string{"Clone", "Pull", "Fetch", "Stage", "Commit", "Push", "Status", "Restore"}
 	var buttons []string
 	for i, name := range buttonNames {
 		if g.focusedInput == 3 && g.selectedButton == i {
@@ -665,21 +697,18 @@ func (g *GitPane) View() string {
 		}
 	}
 	
-	// Calculate total button width and spacing
-	// Panel content width is 84 - 4 (border) - 4 (padding) = 76
-	// Each button has padding(0, 1) which adds 2 chars per button, plus the text length
-	// Button text lengths: Clone(5), Pull(4), Push(4), Fetch(5), Stage(5), Status(6), Restore(7)
-	// Total text: 36 chars, with padding: 36 + (7 buttons * 2) = 50 chars
-	// Available space for gaps: 76 - 50 = 26 chars
-	// Number of gaps between 7 buttons: 6 gaps
-	// Space per gap: 26 / 6 ≈ 4 chars (with some remainder)
+	// Create button row with spacing and separators
+	// Group 1: Clone Pull Fetch (remote operations)
+	buttonRow := buttons[0] + "  " + buttons[1] + "  " + buttons[2]
+	// Separator
+	buttonRow += "  |  "
+	// Group 2: Stage Commit Push (local to remote workflow)
+	buttonRow += buttons[3] + "  " + buttons[4] + "  " + buttons[5]
+	// Separator
+	buttonRow += "  |  "
+	// Group 3: Status Restore (info and undo)
+	buttonRow += buttons[6] + "  " + buttons[7]
 	
-	// Create evenly spaced button row
-	buttonRow := buttons[0]
-	for i := 1; i < len(buttons); i++ {
-		// Add spacing between buttons (4 spaces for even distribution)
-		buttonRow += "    " + buttons[i]
-	}
 	content.WriteString(buttonRow)
 	content.WriteString("\n\n")
 
