@@ -30,6 +30,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
 	"github.com/user/terminal-intelligence/internal/gemini"
+	"github.com/user/terminal-intelligence/internal/git"
 	"github.com/user/terminal-intelligence/internal/installer"
 	"github.com/user/terminal-intelligence/internal/ollama"
 	"github.com/user/terminal-intelligence/internal/types"
@@ -57,6 +58,7 @@ type App struct {
 	config                    *types.AppConfig          // Application configuration
 	editorPane                *EditorPane               // Left pane: code editor
 	aiPane                    *AIChatPane               // Right pane: AI chat
+	gitPane                   *GitPane                  // Git operations popup overlay
 	fileManager               *filemanager.FileManager  // File system operations
 	aiClient                  ai.AIClient               // AI service client (Ollama or Gemini)
 	agenticFixer              *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
@@ -139,6 +141,10 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	// Initialize AgenticCodeFixer
 	agenticFixer := agentic.NewAgenticCodeFixer(aiClient, config.DefaultModel)
 
+	// Initialize GitClient and GitPane
+	gitClient := git.NewClient(config.WorkspaceDir)
+	gitPane := NewGitPane(gitClient, config.WorkspaceDir)
+
 	return &App{
 		config:               config,
 		fileManager:          fm,
@@ -146,6 +152,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		agenticFixer:         agenticFixer,
 		editorPane:           NewEditorPane(fm),
 		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider, config.WorkspaceDir),
+		gitPane:              gitPane,
 		activePane:           types.EditorPaneType,
 		ready:                false,
 		showExitConfirmation: false,
@@ -446,6 +453,28 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		return a, tea.Batch(cmds...)
 
+	case GitOperationCompleteMsg:
+		// Handle Git operation completion
+		if msg.Operation == "clone" && msg.Success && msg.NewDir != "" {
+			// Change working directory to the newly cloned repository
+			a.config.WorkspaceDir = msg.NewDir
+			
+			// Update GitPane working directory
+			cmd := a.gitPane.SetWorkDir(msg.NewDir)
+			cmds = append(cmds, cmd)
+			
+			// Notify user of directory change
+			a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir
+			
+			// Close the Git UI after successful clone
+			a.gitPane.Toggle()
+		}
+		
+		// Forward the message to GitPane for status display
+		_, cmd := a.gitPane.Update(msg)
+		cmds = append(cmds, cmd)
+		return a, tea.Batch(cmds...)
+
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
@@ -470,6 +499,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update AI pane size
 		a.aiPane.width = aiWidth
 		a.aiPane.height = paneHeight
+
+		// Update GitPane size for proper centering
+		a.gitPane.width = msg.Width
+		a.gitPane.height = msg.Height
 
 		return a, nil
 
@@ -834,6 +867,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showHelp = !a.showHelp
 			return a, nil
 
+		case "ctrl+g":
+			// Toggle Git UI
+			cmd := a.gitPane.Toggle()
+			return a, cmd
+
 		case "ctrl+a":
 			// Save entire AI chat history to .ti/ folder
 			history := a.aiPane.GetHistory()
@@ -1163,6 +1201,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, tea.Batch(cmds...)
 		}
+	}
+
+	// Route messages to GitPane first if it's visible
+	if a.gitPane.IsVisible() {
+		var gitCmd tea.Cmd
+		_, gitCmd = a.gitPane.Update(msg)
+		if gitCmd != nil {
+			cmds = append(cmds, gitCmd)
+		}
+		// When GitPane is visible, don't route to other panes
+		return a, tea.Batch(cmds...)
 	}
 
 	// Route messages to active pane
@@ -1610,7 +1659,16 @@ func (a *App) View() string {
 	mainView := lipgloss.JoinHorizontal(lipgloss.Top, editorContent, aiContent)
 
 	// Combine all sections vertically
-	return lipgloss.JoinVertical(lipgloss.Left, header, editorTitleBar, mainView, statusBar)
+	baseView := lipgloss.JoinVertical(lipgloss.Left, header, editorTitleBar, mainView, statusBar)
+
+	// If GitPane is visible, render it as an overlay on top of the base view
+	if a.gitPane.IsVisible() {
+		gitPaneView := a.gitPane.View()
+		// Center the GitPane popup on the screen
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, gitPaneView, lipgloss.WithWhitespaceChars(" "), lipgloss.WithWhitespaceForeground(lipgloss.NoColor{}))
+	}
+
+	return baseView
 }
 
 // GetEditorPane returns the editor pane for testing
