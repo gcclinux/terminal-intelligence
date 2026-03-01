@@ -19,12 +19,111 @@ Quick overview of current menu shotcuts and key combinations
 - **AI Integration**: Context-aware AI assistance powered by Ollama or Gemini
 - **Agentic Code Fixing**: AI autonomously reads, analyzes, and fixes code directly in the editor
 - **Chat History Management**: Save and reload complete AI conversations with Ctrl+A and Ctrl+L
+- **Integrated Git Operations**: Full Git workflow support with visual panel interface
 - **File Management**: Create, open, save, and delete files
 - **Command Execution**: Run scripts and programs with Ctrl+R (auto-detects file type)
 - **Go Development**: Full support for running Go programs and tests
 - **Keyboard Shortcuts**: Efficient keyboard-driven workflow
 - **Session Management**: Unsaved changes confirmation on exit
 - **Cross-Platform**: Runs on Linux, Windows, and macOS
+
+## Integrated Git Operations
+
+Terminal Intelligence includes a built-in Git client powered by go-git, providing a complete Git workflow without requiring external Git installation. Access all Git operations through an intuitive visual panel interface.
+
+### Opening the Git Panel
+
+Press `Ctrl+G` to open the Git Operations panel. The panel provides:
+- Three input fields for repository URL, username, and password/token
+- Eight operation buttons organized into logical groups
+- Real-time status and error messages
+- Automatic credential detection from existing repositories
+
+### Git Operations
+
+The Git panel organizes operations into three logical groups:
+
+**Remote Operations** (Clone, Pull, Fetch)
+- **Clone**: Clone a repository from a remote URL to your workspace
+- **Pull**: Fetch and merge changes from the remote repository
+- **Fetch**: Download changes from remote without merging
+
+**Local to Remote Workflow** (Stage, Commit, Push)
+- **Stage**: Stage all modified and untracked files for commit
+- **Commit**: Create a commit with staged changes (requires commit message)
+- **Push**: Push local commits to the remote repository
+
+**Info and Undo** (Status, Restore)
+- **Status**: View repository status (modified, staged, and untracked files)
+- **Restore**: Discard all uncommitted changes and restore to last commit
+
+### Git Workflow Example
+
+1. **Check Status**: Press `Ctrl+G`, select Status button, press Enter
+2. **Stage Changes**: Navigate to Stage button, press Enter
+3. **Commit**: Navigate to Commit button, press Enter
+   - Enter your commit message in the input field
+   - Press Enter to commit (message cannot be empty)
+4. **Push**: Navigate to Push button, press Enter to push to remote
+
+### Authentication
+
+The Git panel supports multiple authentication methods:
+
+**GitHub Personal Access Token (Recommended)**
+- Username: Your GitHub username
+- Password: GitHub Personal Access Token (ghp_...)
+- Tokens are securely stored in repository configuration
+
+**Username/Password**
+- Username: Your Git username
+- Password: Your Git password
+- Works with most Git hosting services
+
+**Credential Auto-Detection**
+- When opening the panel in an existing repository, credentials are automatically loaded from `.git/config`
+- Stored credentials are used for subsequent operations
+
+### Navigation
+
+- `Tab` or `Down`: Move focus forward (URL → USER → PASS → Buttons → Commit Message)
+- `Shift+Tab` or `Up`: Move focus backward
+- `Left/Right`: Navigate between buttons when focused on button row
+- `Enter`: Activate selected button or submit commit message
+- `Esc`: Close the Git panel
+
+### Commit Message Input
+
+When the Commit button is selected:
+1. Press Enter to show the commit message input field
+2. Type your commit message (cannot be empty)
+3. Press Enter to create the commit
+4. The input field disappears after successful commit
+
+### Features
+
+- **Pure Go Implementation**: No external Git installation required
+- **Credential Management**: Secure storage and auto-detection of credentials
+- **Visual Feedback**: Real-time status messages for all operations
+- **Error Handling**: Clear error messages with actionable guidance
+- **Repository Detection**: Automatically detects if current directory is a Git repository
+- **Cross-Platform**: Works consistently on Linux, Windows, and macOS
+
+### Keyboard Shortcut
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+G` | Open/Close Git Operations Panel |
+
+### Technical Details
+
+The Git integration uses:
+- **go-git/go-git/v5**: Pure Go Git implementation
+- **GitClient** (`internal/git/client.go`): Core Git operations
+- **CredentialStore** (`internal/git/credentials.go`): Secure credential management
+- **GitPane** (`internal/ui/gitpane.go`): Visual panel interface
+
+For more technical details, see [internal/git/README.md](internal/git/README.md).
 
 ## Agentic Code Fixing
 
@@ -199,15 +298,12 @@ git clone https://github.com/user/terminal-intelligence.git
 cd terminal-intelligence
 
 # Build the application
-make build
-
-# Install to local system (optional)
-make install
+make linux
 ```
 
 ### Compile in windows
 ```powershell
- go build -o .\build\ti.exe
+ .\build.ps1 windows
 ```
 
 ### Pre-built Binaries
@@ -267,36 +363,6 @@ You can edit this file to customize your settings. The application will load it 
 - [Go Language Support](./docs/GO_SUPPORT.md) - Complete guide for Go development in TI
 - [Automatic Language Installation](./docs/AUTO_INSTALL.md) - Auto-detect and install missing runtimes
 
-```
-
-### Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Tab` | Cycle between Editor, AI Input, and AI Response areas |
-| `Ctrl+S` | Save current file |
-| `Ctrl+R` | Execute current script |
-| `Ctrl+Enter` | Send message to AI |
-| `Ctrl+Y` | List code blocks from AI response (Execute/Insert/Return) |
-| `Ctrl+A` | Save full chat history to .ti/ folder |
-| `Ctrl+L` | Load saved chat from .ti/ folder |
-| `Ctrl+T` | Clear chat / New chat |
-| `Ctrl+H` | Show help dialog with all shortcuts |
-| `Ctrl+C` or `Ctrl+Q` | Quit application |
-
-Note: You can also type `/help` in the AI chat to see all keyboard shortcuts and agent commands.
-
-### Workflow Example
-
-1. Launch the application
-2. Create a new file in the editor
-3. Write your code or markdown
-4. Press `Ctrl+S` to save
-5. Press `Tab` to switch to AI pane
-6. Ask the AI for help with your code
-7. Press `Tab` to return to editor
-8. Press `Ctrl+R` to execute your script
-
 ## Building
 
 ### Build for Current Platform
@@ -324,52 +390,7 @@ make windows    # Build for Windows
 make darwin     # Build for macOS
 ```
 
-## Testing
-
-### Run All Tests
-
-```bash
-make test
-```
-
-### Run Specific Test Suites
-
-```bash
-make test-unit          # Unit tests only
-make test-property      # Property-based tests only
-make test-integration   # Integration tests only
-```
-
-### Test Coverage
-
-```bash
-make test-coverage
-```
-
 This generates a coverage report in `coverage.html`.
-
-## Project Structure
-
-```
-terminal-intelligence/
-├── internal/
-│   ├── types/          # Core data structures and types
-│   ├── filemanager/    # File system operations
-│   ├── executor/       # Command and script execution
-│   ├── ollama/         # Ollama AI client
-│   └── ui/             # Bubble Tea UI components
-│       ├── app.go      # Main application
-│       ├── editor.go   # Editor pane
-│       └── aichat.go   # AI chat pane
-├── tests/
-│   ├── unit/           # Unit tests for specific examples
-│   ├── property/       # Property-based tests with gopter
-│   └── integration/    # End-to-end integration tests
-├── main.go             # Application entry point
-├── Makefile            # Build automation
-├── go.mod              # Go module definition
-└── README.md           # This file
-```
 
 ## Architecture
 
@@ -387,23 +408,6 @@ The application follows a clean architecture with clear separation of concerns:
 - **FileManager**: Handles all file system operations
 - **CommandExecutor**: Executes system commands and scripts
 - **OllamaClient**: Communicates with Ollama service via REST API
-
-## Testing Strategy
-
-The project uses a dual testing approach:
-
-- **Unit Tests**: Verify specific examples, edge cases, and error conditions
-- **Property-Based Tests**: Verify universal properties across all inputs using gopter
-- **Integration Tests**: Verify complete user workflows
-
-### Test Coverage
-
-- File operations (create, read, write, delete)
-- Command execution (stdout, stderr, exit codes)
-- AI integration (message history, context inclusion)
-- UI components (editor, AI pane, split-window layout)
-- Keyboard controls (shortcuts, focus management)
-- Session management (unsaved changes, exit confirmation)
 
 ## Configuration
 
