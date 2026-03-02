@@ -213,8 +213,9 @@ func (fm *FileManager) FileExists(filePath string) bool {
 func (fm *FileManager) ListFiles() ([]string, error) {
 	var files []string
 
-	// Image extensions to exclude
-	imageExts := map[string]bool{
+	// Extensions to exclude from the file picker
+	excludedExts := map[string]bool{
+		// Image files
 		".ico":  true,
 		".png":  true,
 		".jpg":  true,
@@ -223,6 +224,8 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 		".gif":  true,
 		".svg":  true,
 		".webp": true,
+		// Binary/executable files
+		".exe": true,
 	}
 
 	err := filepath.Walk(fm.workspaceDir, func(path string, info os.FileInfo, err error) error {
@@ -238,9 +241,9 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 			return nil
 		}
 
-		// Skip image files
+		// Skip excluded file types
 		ext := strings.ToLower(filepath.Ext(path))
-		if imageExts[ext] {
+		if excludedExts[ext] {
 			return nil
 		}
 
