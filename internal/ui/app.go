@@ -27,6 +27,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/agentic"
 	"github.com/user/terminal-intelligence/internal/ai"
+	"github.com/user/terminal-intelligence/internal/bedrock"
 	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
 	"github.com/user/terminal-intelligence/internal/gemini"
@@ -134,6 +135,13 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	var aiClient ai.AIClient
 	if config.Provider == "gemini" {
 		aiClient = gemini.NewGeminiClient(config.GeminiAPIKey)
+	} else if config.Provider == "bedrock" {
+		client, err := bedrock.NewBedrockClient(config.BedrockAPIKey, config.BedrockRegion)
+		if err != nil {
+			// Log error but continue with nil client - will be caught by availability check
+			fmt.Fprintf(os.Stderr, "Failed to initialize Bedrock client: %v\n", err)
+		}
+		aiClient = client
 	} else {
 		aiClient = ollama.NewOllamaClient(config.OllamaURL)
 	}
@@ -223,10 +231,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				jcfg.Model = msg.Values[i]
 			case "gmodel":
 				jcfg.GModel = msg.Values[i]
+			case "bedrock_model":
+				jcfg.BedrockModel = msg.Values[i]
 			case "ollama_url":
 				jcfg.OllamaURL = msg.Values[i]
 			case "gemini_api":
 				jcfg.GeminiAPI = msg.Values[i]
+			case "bedrock_api":
+				jcfg.BedrockAPI = msg.Values[i]
+			case "bedrock_region":
+				jcfg.BedrockRegion = msg.Values[i]
 			case "workspace":
 				jcfg.Workspace = msg.Values[i]
 			}
@@ -257,6 +271,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Reinitialize AI client if provider or settings changed
 		if a.config.Provider == "gemini" {
 			a.aiClient = gemini.NewGeminiClient(a.config.GeminiAPIKey)
+		} else if a.config.Provider == "bedrock" {
+			client, err := bedrock.NewBedrockClient(a.config.BedrockAPIKey, a.config.BedrockRegion)
+			if err != nil {
+				a.statusMessage = "Failed to initialize Bedrock client: " + err.Error()
+				return a, nil
+			}
+			a.aiClient = client
 		} else {
 			a.aiClient = ollama.NewOllamaClient(a.config.OllamaURL)
 		}
@@ -1792,13 +1813,16 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		}
 
 		// Prepare config fields and values
-		fields := []string{"agent", "model", "gmodel", "ollama_url", "gemini_api", "workspace"}
+		fields := []string{"agent", "model", "gmodel", "bedrock_model", "ollama_url", "gemini_api", "bedrock_api", "bedrock_region", "workspace"}
 		values := []string{
 			jcfg.Agent,
 			jcfg.Model,
 			jcfg.GModel,
+			jcfg.BedrockModel,
 			jcfg.OllamaURL,
 			jcfg.GeminiAPI,
+			jcfg.BedrockAPI,
+			jcfg.BedrockRegion,
 			jcfg.Workspace,
 		}
 

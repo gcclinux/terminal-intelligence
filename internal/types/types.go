@@ -17,16 +17,19 @@ const (
 
 // AppConfig holds application configuration
 type AppConfig struct {
-	Provider     string `yaml:"provider"` // "ollama" or "gemini"
-	OllamaURL    string `yaml:"ollama_url"`
-	GeminiAPIKey string `yaml:"gemini_api_key"`
-	DefaultModel string `yaml:"default_model"`
-	OllamaModel  string `yaml:"ollama_model"`
-	GeminiModel  string `yaml:"gemini_model"`
-	EditorTheme  string `yaml:"editor_theme"`
-	WorkspaceDir string `yaml:"workspace_dir"`
-	AutoSave     bool   `yaml:"auto_save"`
-	TabSize      int    `yaml:"tab_size"`
+	Provider      string `yaml:"provider"` // "ollama" or "gemini"
+	OllamaURL     string `yaml:"ollama_url"`
+	GeminiAPIKey  string `yaml:"gemini_api_key"`
+	BedrockAPIKey string `yaml:"bedrock_api_key"`
+	BedrockModel  string `yaml:"bedrock_model"`
+	BedrockRegion string `yaml:"bedrock_region"`
+	DefaultModel  string `yaml:"default_model"`
+	OllamaModel   string `yaml:"ollama_model"`
+	GeminiModel   string `yaml:"gemini_model"`
+	EditorTheme   string `yaml:"editor_theme"`
+	WorkspaceDir  string `yaml:"workspace_dir"`
+	AutoSave      bool   `yaml:"auto_save"`
+	TabSize       int    `yaml:"tab_size"`
 }
 
 // DefaultConfig returns default application configuration

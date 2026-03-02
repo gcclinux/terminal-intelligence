@@ -11,12 +11,15 @@ import (
 
 // JSONConfig represents the JSON config file schema.
 type JSONConfig struct {
-	Agent     string `json:"agent"`
-	Model     string `json:"model"`
-	GModel    string `json:"gmodel"`
-	OllamaURL string `json:"ollama_url"`
-	GeminiAPI string `json:"gemini_api"`
-	Workspace string `json:"workspace"`
+	Agent         string `json:"agent"`
+	Model         string `json:"model"`
+	GModel        string `json:"gmodel"`
+	OllamaURL     string `json:"ollama_url"`
+	GeminiAPI     string `json:"gemini_api"`
+	BedrockAPI    string `json:"bedrock_api"`
+	BedrockModel  string `json:"bedrock_model"`
+	BedrockRegion string `json:"bedrock_region"`
+	Workspace     string `json:"workspace"`
 }
 
 // LoadFromFile reads and parses a JSON config file at the given path.
@@ -44,11 +47,14 @@ func ToJSON(cfg *JSONConfig) ([]byte, error) {
 
 // Validate checks that the JSONConfig has valid field values.
 func Validate(cfg *JSONConfig) error {
-	if cfg.Agent != "gemini" && cfg.Agent != "ollama" {
-		return fmt.Errorf("invalid agent: must be \"gemini\" or \"ollama\"")
+	if cfg.Agent != "gemini" && cfg.Agent != "ollama" && cfg.Agent != "bedrock" {
+		return fmt.Errorf("invalid agent: must be \"gemini\", \"ollama\", or \"bedrock\"")
 	}
 	if cfg.Agent == "gemini" && cfg.GeminiAPI == "" {
 		return fmt.Errorf("gemini_api is required when agent is \"gemini\"")
+	}
+	if cfg.Agent == "bedrock" && cfg.BedrockAPI == "" {
+		return fmt.Errorf("bedrock_api is required when agent is \"bedrock\"")
 	}
 	return nil
 }
@@ -67,11 +73,18 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 	if jcfg.Model != "" {
 		appCfg.OllamaModel = jcfg.Model
 	}
+	if jcfg.BedrockModel != "" {
+		appCfg.BedrockModel = jcfg.BedrockModel
+	}
 
 	// Set active model based on provider
 	if appCfg.Provider == "gemini" {
 		if appCfg.GeminiModel != "" {
 			appCfg.DefaultModel = appCfg.GeminiModel
+		}
+	} else if appCfg.Provider == "bedrock" {
+		if appCfg.BedrockModel != "" {
+			appCfg.DefaultModel = appCfg.BedrockModel
 		}
 	} else {
 		// Default to ollama
@@ -86,6 +99,15 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 	if jcfg.GeminiAPI != "" {
 		appCfg.GeminiAPIKey = jcfg.GeminiAPI
 	}
+	if jcfg.BedrockAPI != "" {
+		appCfg.BedrockAPIKey = jcfg.BedrockAPI
+	}
+	if jcfg.BedrockRegion != "" {
+		appCfg.BedrockRegion = jcfg.BedrockRegion
+	} else if appCfg.Provider == "bedrock" && appCfg.BedrockRegion == "" {
+		// Default to us-east-1 if bedrock is the provider and region is not set
+		appCfg.BedrockRegion = "us-east-1"
+	}
 	if jcfg.Workspace != "" {
 		appCfg.WorkspaceDir = jcfg.Workspace
 	}
@@ -94,18 +116,25 @@ func ApplyToAppConfig(jcfg *JSONConfig, appCfg *types.AppConfig) {
 // AppConfigToJSONConfig converts an AppConfig into a JSONConfig for serialization.
 func AppConfigToJSONConfig(appCfg *types.AppConfig) *JSONConfig {
 	jcfg := &JSONConfig{
-		Agent:     appCfg.Provider,
-		OllamaURL: appCfg.OllamaURL,
-		GeminiAPI: appCfg.GeminiAPIKey,
-		Workspace: appCfg.WorkspaceDir,
-		Model:     appCfg.OllamaModel,
-		GModel:    appCfg.GeminiModel,
+		Agent:         appCfg.Provider,
+		OllamaURL:     appCfg.OllamaURL,
+		GeminiAPI:     appCfg.GeminiAPIKey,
+		BedrockAPI:    appCfg.BedrockAPIKey,
+		BedrockRegion: appCfg.BedrockRegion,
+		Workspace:     appCfg.WorkspaceDir,
+		Model:         appCfg.OllamaModel,
+		GModel:        appCfg.GeminiModel,
+		BedrockModel:  appCfg.BedrockModel,
 	}
 
 	// Ensure active model is synced to the correct field if stored model is empty
 	if appCfg.Provider == "gemini" {
 		if jcfg.GModel == "" {
 			jcfg.GModel = appCfg.DefaultModel
+		}
+	} else if appCfg.Provider == "bedrock" {
+		if jcfg.BedrockModel == "" {
+			jcfg.BedrockModel = appCfg.DefaultModel
 		}
 	} else {
 		if jcfg.Model == "" {

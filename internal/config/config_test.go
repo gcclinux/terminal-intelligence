@@ -442,3 +442,327 @@ func TestCreateDefaultConfig_CreatesDirectory(t *testing.T) {
 		t.Fatalf("Config directory was not created at %s", configDir)
 	}
 }
+
+// =============================================================================
+// Property-Based Tests for Bedrock Integration
+// =============================================================================
+
+// Feature: aws-bedrock-integration, Property 6: Configuration Round-Trip Preservation
+// **Validates: Requirements 4.1, 4.2, 4.3, 4.7, 4.8**
+func TestProperty6_ConfigRoundTrip_BedrockFields(t *testing.T) {
+	testCases := []struct {
+		name          string
+		bedrockAPI    string
+		bedrockModel  string
+		bedrockRegion string
+	}{
+		{"all fields populated", "AKIAIOSFODNN7EXAMPLE", "anthropic.claude-haiku-4-5-v1:0", "us-east-1"},
+		{"different region", "AKIAIOSFODNN7EXAMPLE", "anthropic.claude-3-5-sonnet-20241022-v2:0", "us-west-2"},
+		{"empty model", "AKIAIOSFODNN7EXAMPLE", "", "eu-west-1"},
+		{"empty region", "AKIAIOSFODNN7EXAMPLE", "anthropic.claude-3-5-haiku-20241022-v1:0", ""},
+		{"minimal config", "AKIAIOSFODNN7EXAMPLE", "", ""},
+		{"long api key", "AKIAIOSFODNN7EXAMPLEVERYLONGKEY123456789", "anthropic.claude-haiku-4-5-v1:0", "ap-southeast-1"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Create original AppConfig with Bedrock settings
+			original := &types.AppConfig{
+				Provider:      "bedrock",
+				BedrockAPIKey: tc.bedrockAPI,
+				BedrockModel:  tc.bedrockModel,
+				BedrockRegion: tc.bedrockRegion,
+				DefaultModel:  tc.bedrockModel,
+				WorkspaceDir:  "/tmp/workspace",
+			}
+
+			// Convert to JSONConfig
+			jcfg := AppConfigToJSONConfig(original)
+
+			// Convert back to AppConfig
+			result := types.DefaultConfig()
+			ApplyToAppConfig(jcfg, result)
+
+			// Verify all Bedrock fields are preserved
+			if result.BedrockAPIKey != tc.bedrockAPI {
+				t.Errorf("BedrockAPIKey: got %q, want %q", result.BedrockAPIKey, tc.bedrockAPI)
+			}
+			if result.BedrockModel != tc.bedrockModel {
+				t.Errorf("BedrockModel: got %q, want %q", result.BedrockModel, tc.bedrockModel)
+			}
+
+			// Region should be preserved or defaulted to us-east-1
+			expectedRegion := tc.bedrockRegion
+			if expectedRegion == "" {
+				expectedRegion = "us-east-1"
+			}
+			if result.BedrockRegion != expectedRegion {
+				t.Errorf("BedrockRegion: got %q, want %q", result.BedrockRegion, expectedRegion)
+			}
+
+			if result.Provider != "bedrock" {
+				t.Errorf("Provider: got %q, want %q", result.Provider, "bedrock")
+			}
+		})
+	}
+}
+
+// Feature: aws-bedrock-integration, Property 7: Provider-Specific Model Selection
+// **Validates: Requirements 5.5**
+func TestProperty7_ProviderSpecificModelSelection(t *testing.T) {
+	testCases := []struct {
+		provider      string
+		ollamaModel   string
+		geminiModel   string
+		bedrockModel  string
+		expectedModel string
+	}{
+		{"ollama", "llama2", "gemini-2.0-flash-exp", "anthropic.claude-haiku-4-5-v1:0", "llama2"},
+		{"gemini", "llama2", "gemini-2.0-flash-exp", "anthropic.claude-haiku-4-5-v1:0", "gemini-2.0-flash-exp"},
+		{"bedrock", "llama2", "gemini-2.0-flash-exp", "anthropic.claude-haiku-4-5-v1:0", "anthropic.claude-haiku-4-5-v1:0"},
+		{"ollama", "qwen2.5-coder:1.5b", "", "", "qwen2.5-coder:1.5b"},
+		{"gemini", "", "gemini-3-pro-preview", "", "gemini-3-pro-preview"},
+		{"bedrock", "", "", "anthropic.claude-3-5-sonnet-20241022-v2:0", "anthropic.claude-3-5-sonnet-20241022-v2:0"},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.provider+"_"+tc.expectedModel, func(t *testing.T) {
+			jcfg := &JSONConfig{
+				Agent:        tc.provider,
+				Model:        tc.ollamaModel,
+				GModel:       tc.geminiModel,
+				BedrockModel: tc.bedrockModel,
+			}
+
+			appCfg := types.DefaultConfig()
+			ApplyToAppConfig(jcfg, appCfg)
+
+			if appCfg.DefaultModel != tc.expectedModel {
+				t.Errorf("DefaultModel: got %q, want %q", appCfg.DefaultModel, tc.expectedModel)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// Backward Compatibility Tests (Requirements 8.1, 8.2, 8.3, 8.4)
+// =============================================================================
+
+// Test loading config without Bedrock fields
+// **Validates: Requirement 8.1**
+func TestBackwardCompat_LoadConfigWithoutBedrockFields(t *testing.T) {
+	// Simulate an old config file that doesn't have Bedrock fields
+	oldConfigJSON := []byte(`{
+		"agent": "ollama",
+		"model": "llama2",
+		"ollama_url": "http://localhost:11434",
+		"workspace": "/tmp/workspace"
+	}`)
+
+	jcfg, err := FromJSON(oldConfigJSON)
+	if err != nil {
+		t.Fatalf("FromJSON error: %v", err)
+	}
+
+	// Verify Bedrock fields are empty/default
+	if jcfg.BedrockAPI != "" {
+		t.Errorf("BedrockAPI should be empty, got %q", jcfg.BedrockAPI)
+	}
+	if jcfg.BedrockModel != "" {
+		t.Errorf("BedrockModel should be empty, got %q", jcfg.BedrockModel)
+	}
+	if jcfg.BedrockRegion != "" {
+		t.Errorf("BedrockRegion should be empty, got %q", jcfg.BedrockRegion)
+	}
+
+	// Apply to AppConfig and verify it works
+	appCfg := types.DefaultConfig()
+	ApplyToAppConfig(jcfg, appCfg)
+
+	if appCfg.Provider != "ollama" {
+		t.Errorf("Provider: got %q, want %q", appCfg.Provider, "ollama")
+	}
+	if appCfg.DefaultModel != "llama2" {
+		t.Errorf("DefaultModel: got %q, want %q", appCfg.DefaultModel, "llama2")
+	}
+}
+
+// Test saving config without Bedrock configured
+// **Validates: Requirement 8.3**
+func TestBackwardCompat_SaveConfigWithoutBedrock(t *testing.T) {
+	// Create AppConfig without Bedrock settings
+	appCfg := &types.AppConfig{
+		Provider:     "gemini",
+		GeminiAPIKey: "test-key",
+		GeminiModel:  "gemini-2.0-flash-exp",
+		DefaultModel: "gemini-2.0-flash-exp",
+		OllamaURL:    "http://localhost:11434",
+		WorkspaceDir: "/tmp/workspace",
+	}
+
+	// Convert to JSONConfig
+	jcfg := AppConfigToJSONConfig(appCfg)
+
+	// Serialize to JSON
+	data, err := ToJSON(jcfg)
+	if err != nil {
+		t.Fatalf("ToJSON error: %v", err)
+	}
+
+	// Verify JSON is valid and can be loaded back
+	restored, err := FromJSON(data)
+	if err != nil {
+		t.Fatalf("FromJSON error: %v", err)
+	}
+
+	// Verify non-Bedrock fields are preserved
+	if restored.Agent != "gemini" {
+		t.Errorf("Agent: got %q, want %q", restored.Agent, "gemini")
+	}
+	if restored.GeminiAPI != "test-key" {
+		t.Errorf("GeminiAPI: got %q, want %q", restored.GeminiAPI, "test-key")
+	}
+
+	// Bedrock fields should be empty or omitted (both are acceptable)
+	// The important thing is that the config is valid
+	if err := Validate(restored); err != nil {
+		t.Errorf("Config should be valid even without Bedrock fields: %v", err)
+	}
+}
+
+// Test that existing Ollama and Gemini configurations still work
+// **Validates: Requirements 8.2, 8.4**
+func TestBackwardCompat_ExistingProvidersStillWork(t *testing.T) {
+	testCases := []struct {
+		name     string
+		provider string
+		config   *JSONConfig
+	}{
+		{
+			name:     "ollama config",
+			provider: "ollama",
+			config: &JSONConfig{
+				Agent:     "ollama",
+				Model:     "llama2",
+				OllamaURL: "http://localhost:11434",
+				Workspace: "/tmp/workspace",
+			},
+		},
+		{
+			name:     "gemini config",
+			provider: "gemini",
+			config: &JSONConfig{
+				Agent:     "gemini",
+				GModel:    "gemini-2.0-flash-exp",
+				GeminiAPI: "test-api-key",
+				Workspace: "/tmp/workspace",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Validate the config
+			if err := Validate(tc.config); err != nil {
+				t.Fatalf("Validate error for %s: %v", tc.provider, err)
+			}
+
+			// Apply to AppConfig
+			appCfg := types.DefaultConfig()
+			ApplyToAppConfig(tc.config, appCfg)
+
+			// Verify provider is set correctly
+			if appCfg.Provider != tc.provider {
+				t.Errorf("Provider: got %q, want %q", appCfg.Provider, tc.provider)
+			}
+
+			// Verify provider-specific fields are set
+			if tc.provider == "ollama" {
+				if appCfg.OllamaURL != tc.config.OllamaURL {
+					t.Errorf("OllamaURL: got %q, want %q", appCfg.OllamaURL, tc.config.OllamaURL)
+				}
+				if appCfg.DefaultModel != tc.config.Model {
+					t.Errorf("DefaultModel: got %q, want %q", appCfg.DefaultModel, tc.config.Model)
+				}
+			} else if tc.provider == "gemini" {
+				if appCfg.GeminiAPIKey != tc.config.GeminiAPI {
+					t.Errorf("GeminiAPIKey: got %q, want %q", appCfg.GeminiAPIKey, tc.config.GeminiAPI)
+				}
+				if appCfg.DefaultModel != tc.config.GModel {
+					t.Errorf("DefaultModel: got %q, want %q", appCfg.DefaultModel, tc.config.GModel)
+				}
+			}
+
+			// Round-trip test
+			jcfg := AppConfigToJSONConfig(appCfg)
+			data, err := ToJSON(jcfg)
+			if err != nil {
+				t.Fatalf("ToJSON error: %v", err)
+			}
+
+			restored, err := FromJSON(data)
+			if err != nil {
+				t.Fatalf("FromJSON error: %v", err)
+			}
+
+			if restored.Agent != tc.provider {
+				t.Errorf("Round-trip Agent: got %q, want %q", restored.Agent, tc.provider)
+			}
+		})
+	}
+}
+
+// Test Validate function with Bedrock configurations
+// **Validates: Requirements 4.4, 4.5**
+func TestValidate_BedrockAgent(t *testing.T) {
+	testCases := []struct {
+		name        string
+		config      *JSONConfig
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "valid bedrock config",
+			config: &JSONConfig{
+				Agent:      "bedrock",
+				BedrockAPI: "AKIAIOSFODNN7EXAMPLE",
+			},
+			expectError: false,
+		},
+		{
+			name: "bedrock without API key",
+			config: &JSONConfig{
+				Agent:      "bedrock",
+				BedrockAPI: "",
+			},
+			expectError: true,
+			errorMsg:    "bedrock_api is required",
+		},
+		{
+			name: "invalid agent",
+			config: &JSONConfig{
+				Agent: "openai",
+			},
+			expectError: true,
+			errorMsg:    "invalid agent",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := Validate(tc.config)
+			if tc.expectError {
+				if err == nil {
+					t.Fatalf("expected error containing %q, got nil", tc.errorMsg)
+				}
+				if !strings.Contains(err.Error(), tc.errorMsg) {
+					t.Errorf("expected error containing %q, got %q", tc.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("expected no error, got %v", err)
+				}
+			}
+		})
+	}
+}
