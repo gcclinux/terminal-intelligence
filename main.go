@@ -104,14 +104,10 @@ func main() {
 		if *model == "" {
 			appCfg.DefaultModel = "gemini-2.0-flash-exp"
 		}
-	} else if appCfg.Provider != "gemini" {
-		// Only default to ollama if config file didn't set gemini
-		appCfg.Provider = "ollama"
-		if *ollamaURL != "" {
-			appCfg.OllamaURL = *ollamaURL
-		}
-	} else if *ollamaURL != "" {
-		// CLI ollama URL override even when config says gemini
+	}
+
+	// Apply CLI overrides for Ollama URL if provided
+	if *ollamaURL != "" {
 		appCfg.OllamaURL = *ollamaURL
 	}
 

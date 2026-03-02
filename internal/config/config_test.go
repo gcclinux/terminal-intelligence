@@ -766,3 +766,106 @@ func TestValidate_BedrockAgent(t *testing.T) {
 		})
 	}
 }
+
+// =============================================================================
+// Provider Persistence Tests (Bug Fix)
+// =============================================================================
+
+// Test that Bedrock provider persists after config load
+// This test verifies the fix for the bug where agent reverted to ollama on restart
+func TestProviderPersistence_BedrockStaysBedrockAfterLoad(t *testing.T) {
+	// Create a config file with bedrock as the agent
+	bedrockConfig := &JSONConfig{
+		Agent:         "bedrock",
+		BedrockAPI:    "AKIAIOSFODNN7EXAMPLE:wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
+		BedrockModel:  "anthropic.claude-sonnet-4-6",
+		BedrockRegion: "us-east-1",
+		Workspace:     "/tmp/workspace",
+	}
+
+	// Serialize to JSON
+	data, err := ToJSON(bedrockConfig)
+	if err != nil {
+		t.Fatalf("ToJSON error: %v", err)
+	}
+
+	// Load back from JSON (simulating app restart)
+	restored, err := FromJSON(data)
+	if err != nil {
+		t.Fatalf("FromJSON error: %v", err)
+	}
+
+	// Apply to AppConfig (simulating what main.go does)
+	appCfg := types.DefaultConfig()
+	ApplyToAppConfig(restored, appCfg)
+
+	// Verify provider is still bedrock (not reverted to ollama)
+	if appCfg.Provider != "bedrock" {
+		t.Errorf("Provider should persist as bedrock, got %q", appCfg.Provider)
+	}
+
+	// Verify Bedrock-specific fields are preserved
+	if appCfg.BedrockAPIKey != bedrockConfig.BedrockAPI {
+		t.Errorf("BedrockAPIKey: got %q, want %q", appCfg.BedrockAPIKey, bedrockConfig.BedrockAPI)
+	}
+	if appCfg.BedrockModel != bedrockConfig.BedrockModel {
+		t.Errorf("BedrockModel: got %q, want %q", appCfg.BedrockModel, bedrockConfig.BedrockModel)
+	}
+	if appCfg.BedrockRegion != bedrockConfig.BedrockRegion {
+		t.Errorf("BedrockRegion: got %q, want %q", appCfg.BedrockRegion, bedrockConfig.BedrockRegion)
+	}
+}
+
+// Test that Gemini provider persists after config load
+func TestProviderPersistence_GeminiStaysGeminiAfterLoad(t *testing.T) {
+	geminiConfig := &JSONConfig{
+		Agent:     "gemini",
+		GeminiAPI: "test-api-key-123",
+		GModel:    "gemini-3.1-flash-lite",
+		Workspace: "/tmp/workspace",
+	}
+
+	data, err := ToJSON(geminiConfig)
+	if err != nil {
+		t.Fatalf("ToJSON error: %v", err)
+	}
+
+	restored, err := FromJSON(data)
+	if err != nil {
+		t.Fatalf("FromJSON error: %v", err)
+	}
+
+	appCfg := types.DefaultConfig()
+	ApplyToAppConfig(restored, appCfg)
+
+	if appCfg.Provider != "gemini" {
+		t.Errorf("Provider should persist as gemini, got %q", appCfg.Provider)
+	}
+}
+
+// Test that Ollama provider persists after config load
+func TestProviderPersistence_OllamaStaysOllamaAfterLoad(t *testing.T) {
+	ollamaConfig := &JSONConfig{
+		Agent:     "ollama",
+		Model:     "qwen2.5-coder:3b",
+		OllamaURL: "http://localhost:11434",
+		Workspace: "/tmp/workspace",
+	}
+
+	data, err := ToJSON(ollamaConfig)
+	if err != nil {
+		t.Fatalf("ToJSON error: %v", err)
+	}
+
+	restored, err := FromJSON(data)
+	if err != nil {
+		t.Fatalf("FromJSON error: %v", err)
+	}
+
+	appCfg := types.DefaultConfig()
+	ApplyToAppConfig(restored, appCfg)
+
+	if appCfg.Provider != "ollama" {
+		t.Errorf("Provider should persist as ollama, got %q", appCfg.Provider)
+	}
+}

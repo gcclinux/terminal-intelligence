@@ -112,6 +112,40 @@ func splitAPIKey(apiKey string) []string {
 	return result
 }
 
+// convertToInferenceProfile converts direct model IDs to inference profile IDs for Claude 4+ models
+// Claude 4.5+ models require inference profiles instead of direct model IDs
+// Args:
+//
+//	modelID: string - the model ID (e.g., "anthropic.claude-haiku-4-5-v1:0" or "anthropic.claude-sonnet-4-6")
+//	region: string - the AWS region
+//
+// Returns: inference profile ID or original model ID if not a Claude 4+ model
+func convertToInferenceProfile(modelID string, region string) string {
+	// Map of Claude 4+ model IDs to their inference profile patterns
+	claude4Models := map[string]string{
+		// Claude 4.5 models (with version suffix)
+		"anthropic.claude-haiku-4-5-v1:0":           "anthropic.claude-haiku-4-5-v1:0",
+		"anthropic.claude-sonnet-4-5-v1:0":          "anthropic.claude-sonnet-4-5-v1:0",
+		"anthropic.claude-opus-4-5-v1:0":            "anthropic.claude-opus-4-5-v1:0",
+		"anthropic.claude-3-5-sonnet-20241022-v2:0": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+		"anthropic.claude-3-5-haiku-20241022-v1:0":  "anthropic.claude-3-5-haiku-20241022-v1:0",
+		// Claude 4.6+ models (new naming convention without date/version)
+		"anthropic.claude-sonnet-4-6": "anthropic.claude-sonnet-4-6",
+		"anthropic.claude-haiku-4-6":  "anthropic.claude-haiku-4-6",
+		"anthropic.claude-opus-4-6":   "anthropic.claude-opus-4-6",
+	}
+
+	// Check if this is a Claude 4+ model that needs an inference profile
+	if baseModel, isClaude4 := claude4Models[modelID]; isClaude4 {
+		// Use geographic inference profile format: {region}.{model-id}
+		// This provides regional inference with cross-region failover
+		return fmt.Sprintf("us.%s", baseModel)
+	}
+
+	// Return original model ID for older models
+	return modelID
+}
+
 // formatAWSError formats AWS SDK errors with HTTP status codes and descriptive messages
 func formatAWSError(err error, operation string) error {
 	if err == nil {
@@ -188,15 +222,18 @@ func (bc *BedrockClient) IsAvailable() (bool, error) {
 // Args:
 //
 //	prompt: string - user's prompt to the AI
-//	model: string - model name to use (default: "anthropic.claude-haiku-4-5-v1:0")
+//	model: string - model name to use (default: "us.anthropic.claude-haiku-4-5-v1:0")
 //	context: []int - optional context tokens from previous conversation
 //
 // Returns: channel for streaming response chunks, error if request fails
 func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
 	// Default model to Claude Haiku 4.5 if empty
 	if model == "" {
-		model = "anthropic.claude-haiku-4-5-v1:0"
+		model = "us.anthropic.claude-haiku-4-5-v1:0"
 	}
+
+	// Convert direct model IDs to inference profile IDs for Claude 4.5 models
+	model = convertToInferenceProfile(model, bc.region)
 
 	// Construct request body using anthropicRequest struct
 	requestBody := buildRequestBody(prompt)
@@ -281,8 +318,13 @@ func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<
 // Returns: slice of model names, error if request fails
 func (bc *BedrockClient) ListModels() ([]string, error) {
 	// Return hardcoded list of supported Claude models
+	// Note: Claude 4+ models will be automatically converted to inference profiles
 	return []string{
+		"anthropic.claude-sonnet-4-6",
+		"anthropic.claude-haiku-4-6",
+		"anthropic.claude-opus-4-6",
 		"anthropic.claude-haiku-4-5-v1:0",
+		"anthropic.claude-sonnet-4-5-v1:0",
 		"anthropic.claude-3-5-sonnet-20241022-v2:0",
 		"anthropic.claude-3-5-haiku-20241022-v1:0",
 	}, nil

@@ -1,6 +1,8 @@
 # Terminal Intelligence (TI)
 
-A lightweight CLI-based IDE with integrated AI assistance through Ollama. Features a split-window terminal interface with an integrated code editor and AI assistant for creating, editing, and testing scripts and markdown documents.
+A lightweight CLI-based IDE with integrated AI assistance through Ollama, Gemini & Bedrock. Features a split-window terminal interface with an integrated code editor and AI assistant for creating, editing, and testing scripts and markdown documents.
+
+### ~~ ***Early Days but whatch this space*** ~~
 
 ### Menu View & Shotcuts
 Quick overview of current menu shotcuts and key combinations
@@ -16,7 +18,7 @@ Quick overview of current menu shotcuts and key combinations
 - **Multi-Language Support**: Edit and run Bash, PowerShell, Python, Go, and Markdown files
 - **Auto-Install Detection**: Automatically detects missing language runtimes and offers to install them
 - **Code Editor**: Syntax-aware text editing with line numbers and file type detection
-- **AI Integration**: Context-aware AI assistance powered by Ollama or Gemini
+- **AI Integration**: Context-aware AI assistance powered by Ollama, Gemini, or AWS Bedrock
 - **Agentic Code Fixing**: AI autonomously reads, analyzes, and fixes code directly in the editor
 - **Chat History Management**: Save and reload complete AI conversations with Ctrl+A and Ctrl+L
 - **Integrated Git Operations**: Full Git workflow support with visual panel interface
@@ -85,13 +87,23 @@ The Git panel supports multiple authentication methods:
 - When opening the panel in an existing repository, credentials are automatically loaded from `.git/config`
 - Stored credentials are used for subsequent operations
 
-### Navigation
+## Tested LLMs
 
-- `Tab` or `Down`: Move focus forward (URL → USER → PASS → Buttons → Commit Message)
-- `Shift+Tab` or `Up`: Move focus backward
-- `Left/Right`: Navigate between buttons when focused on button row
-- `Enter`: Activate selected button or submit commit message
-- `Esc`: Close the Git panel
+Terminal Intelligence has been tested and verified to work with the following AI models:
+
+| Provider | Model | Notes |
+|----------|-------|-------|
+| **Ollama** | `qwen2.5-coder:3b` | Recommended for coding tasks |
+| | `qwen2.5-coder:1.5b` | Lightweight coding model |
+| | `deepseek-coder-v2:16b` | Advanced coding capabilities |
+| **Gemini** | `gemini-3-flash-preview` | Fast responses |
+| | `gemini-3.1-pro-preview` | Advanced reasoning |
+| | `gemini-3.1-flash-lite` | Lightweight and fast |
+| **AWS Bedrock** | `anthropic.claude-sonnet-4-6` | Best coding performance |
+| | `anthropic.claude-haiku-4-6` | Fast and cost-effective |
+| | `anthropic.claude-opus-4-6` | Highest intelligence |
+
+**Note:** AWS Bedrock models automatically use inference profiles for optimal performance and cross-region failover.
 
 ### Commit Message Input
 
@@ -200,6 +212,7 @@ Agentic code fixing works with:
 # Clone the repository
 git clone https://github.com/user/terminal-intelligence.git
 cd terminal-intelligence
+```
 
 ### Pre-built Binaries
 
@@ -207,93 +220,30 @@ Download pre-built binaries for your platform from the releases page.
 
 ## Configuration
 
-The application supports configuration through a JSON file located at `~/.ti/config.json` (or `%USERPROFILE%\.ti\config.json` on Windows).
+Terminal Intelligence supports multiple AI providers (Ollama, Gemini, AWS Bedrock) and can be configured through a JSON file or command-line flags.
 
-### Configuration File
+For detailed configuration instructions, including:
+- Configuration file format and location
+- Provider-specific settings (Ollama, Gemini, Bedrock)
+- Tested LLM models
+- Command-line overrides
+- Security best practices
+- Troubleshooting guide
 
-On first run, if no config file exists, the application will automatically create a default `config.json` with example values at `~/.ti/config.json`.
+See the [Configuration Guide](./docs/CONFIG.md).
 
-You can edit this file to customize your settings. The application will load it automatically on subsequent runs.
-
-**Default Configuration (Ollama):**
-
-```json
-{
-  "agent": "ollama",
-  "model": "qwen2.5-coder:3b",
-  "ollama_url": "http://localhost:11434",
-  "gemini_api": "",
-  "workspace": "/home/user/ti-workspace"
-}
-```
-
-**Example Gemini Configuration:**
-
-```json
-{
-  "agent": "gemini",
-  "model": "gemini-3.1-flash-lite",
-  "ollama_url": "",
-  "gemini_api": "your-api-key-here",
-  "workspace": "/home/user/project-workspace"
-}
-```
-
-**Configuration Fields:**
-
-- `agent`: AI provider - `"ollama"` or `"gemini"`
-- `model`: Model name (e.g., `"llama2"`, `"qwen2.5-coder:3b"`, `"gemini-3-flash-lite, gemini-3-pro-preview"`)
-- `ollama_url`: Ollama server URL (only for Ollama provider)
-- `gemini_api`: Gemini API key (required for Gemini provider)
-- `workspace`: Workspace directory path (absolute path to your workspace folder)
-
-**Note:** Command-line flags override config file values.
-
-## Usage
-
-[Introduction](./docs/USAGE.md)
-
-### Language-Specific Guides
-
-- [Go Language Support](./docs/GO_SUPPORT.md) - Complete guide for Go development in TI
-- [Automatic Language Installation](./docs/AUTO_INSTALL.md) - Auto-detect and install missing runtimes
-
-## Building
-
-### Build for Current Platform
+**Quick Start:**
 
 ```bash
-make build
+# Edit configuration interactively
 ```
-
-### Build for All Platforms
-
-```bash
-make all-platforms
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a---          02/03/2026    15:51       13553600 ti-darwin-amd64
+-a---          02/03/2026    15:51       12639810 ti-darwin-arm64
+-a---          02/03/2026    15:51       12386488 ti-linux-aarch64
+-a---          02/03/2026    15:51       13295800 ti-linux-amd64
+-a---          02/03/2026    15:51       13813248 ti-windows-amd64.exe
 ```
-
-This creates binaries for:
-- Linux (amd64)
-- Windows (amd64)
-- macOS (amd64 and arm64)
-
-### Build Targets
-
-```bash
-make linux      # Build for Linux
-make windows    # Build for Windows
-make darwin     # Build for macOS
+# Then press Ctrl+C and type: /config
 ```
-
-- [TI Architecture](./docs/ARCHITECTURE.md) - Overal Architectore overview of Terminal Intelligence (TI)
-
-## License
-
-MIT
-
-## Acknowledgments
-
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) - Terminal UI framework
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) - Terminal styling
-- [Ollama](https://ollama.ai/) - Local LLM runtime
-- [gopter](https://github.com/leanovate/gopter) - Property-based testing

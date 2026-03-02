@@ -1382,3 +1382,84 @@ func containsErrorKeyword(msg string) bool {
 
 	return false
 }
+
+// TestConvertToInferenceProfile verifies that Claude 4+ models are converted to inference profiles
+func TestConvertToInferenceProfile(t *testing.T) {
+	tests := []struct {
+		name     string
+		modelID  string
+		region   string
+		expected string
+	}{
+		{
+			name:     "Claude Sonnet 4.6 converts to inference profile",
+			modelID:  "anthropic.claude-sonnet-4-6",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-sonnet-4-6",
+		},
+		{
+			name:     "Claude Haiku 4.6 converts to inference profile",
+			modelID:  "anthropic.claude-haiku-4-6",
+			region:   "us-west-2",
+			expected: "us.anthropic.claude-haiku-4-6",
+		},
+		{
+			name:     "Claude Opus 4.6 converts to inference profile",
+			modelID:  "anthropic.claude-opus-4-6",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-opus-4-6",
+		},
+		{
+			name:     "Claude Haiku 4.5 converts to inference profile",
+			modelID:  "anthropic.claude-haiku-4-5-v1:0",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-haiku-4-5-v1:0",
+		},
+		{
+			name:     "Claude Sonnet 4.5 converts to inference profile",
+			modelID:  "anthropic.claude-sonnet-4-5-v1:0",
+			region:   "us-west-2",
+			expected: "us.anthropic.claude-sonnet-4-5-v1:0",
+		},
+		{
+			name:     "Claude Opus 4.5 converts to inference profile",
+			modelID:  "anthropic.claude-opus-4-5-v1:0",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-opus-4-5-v1:0",
+		},
+		{
+			name:     "Claude 3.5 Sonnet converts to inference profile",
+			modelID:  "anthropic.claude-3-5-sonnet-20241022-v2:0",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-3-5-sonnet-20241022-v2:0",
+		},
+		{
+			name:     "Claude 3.5 Haiku converts to inference profile",
+			modelID:  "anthropic.claude-3-5-haiku-20241022-v1:0",
+			region:   "us-east-1",
+			expected: "us.anthropic.claude-3-5-haiku-20241022-v1:0",
+		},
+		{
+			name:     "Older Claude 3 models remain unchanged",
+			modelID:  "anthropic.claude-3-haiku-20240307-v1:0",
+			region:   "us-east-1",
+			expected: "anthropic.claude-3-haiku-20240307-v1:0",
+		},
+		{
+			name:     "Unknown model IDs remain unchanged",
+			modelID:  "some.other.model",
+			region:   "us-east-1",
+			expected: "some.other.model",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertToInferenceProfile(tt.modelID, tt.region)
+			if result != tt.expected {
+				t.Errorf("convertToInferenceProfile(%q, %q) = %q, want %q",
+					tt.modelID, tt.region, result, tt.expected)
+			}
+		})
+	}
+}
