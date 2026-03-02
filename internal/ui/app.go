@@ -458,18 +458,29 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Operation == "clone" && msg.Success && msg.NewDir != "" {
 			// Change working directory to the newly cloned repository
 			a.config.WorkspaceDir = msg.NewDir
-			
-			// Update GitPane working directory
-			cmd := a.gitPane.SetWorkDir(msg.NewDir)
-			cmds = append(cmds, cmd)
-			
-			// Notify user of directory change
-			a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir
-			
-			// Close the Git UI after successful clone
-			a.gitPane.Toggle()
+
+			// Actually change the process working directory
+			if err := os.Chdir(msg.NewDir); err != nil {
+				a.statusMessage = "Cloned successfully but failed to change directory: " + err.Error()
+			} else {
+				// Update FileManager workspace directory
+				a.fileManager.SetWorkspaceDir(msg.NewDir)
+
+				// Update GitPane working directory
+				cmd := a.gitPane.SetWorkDir(msg.NewDir)
+				cmds = append(cmds, cmd)
+
+				// Update AIChatPane workspace root
+				a.aiPane.SetWorkspaceRoot(msg.NewDir)
+
+				// Notify user of directory change
+				a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir
+
+				// Close the Git UI after successful clone
+				a.gitPane.Toggle()
+			}
 		}
-		
+
 		// Forward the message to GitPane for status display
 		_, cmd := a.gitPane.Update(msg)
 		cmds = append(cmds, cmd)
@@ -1390,11 +1401,19 @@ func (a *App) View() string {
 		normalStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
+		// Get the current project folder name
+		projectFolder := filepath.Base(a.config.WorkspaceDir)
+
 		var listDisplay string
 		listDisplay = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Render("Select a chat to load:") + "\n\n"
+			Render("Select a chat to load:") + "\n"
+
+		// Display project folder name
+		listDisplay += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Project: "+projectFolder) + "\n\n"
 
 		maxDisplay := 15
 		startIdx := a.filePickerIndex - maxDisplay/2
@@ -1420,7 +1439,7 @@ func (a *App) View() string {
 		}
 
 		listDisplay += "\n" + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("15")).
 			Render("[↑↓] Navigate | [Enter] Load | [Esc] Cancel")
 
 		dialog := pickerStyle.Render(listDisplay)
@@ -1444,11 +1463,19 @@ func (a *App) View() string {
 		normalStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
+		// Get the current project folder name
+		projectFolder := filepath.Base(a.config.WorkspaceDir)
+
 		var listDisplay string
 		listDisplay = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Render("Select a backup to restore (creates new backup of current):") + "\n\n"
+			Render("Select a backup to restore (creates new backup of current):") + "\n"
+
+		// Display project folder name
+		listDisplay += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Project: "+projectFolder) + "\n\n"
 
 		maxDisplay := 15
 		startIdx := a.filePickerIndex - maxDisplay/2
@@ -1476,7 +1503,7 @@ func (a *App) View() string {
 		}
 
 		listDisplay += "\n" + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("15")).
 			Render("[↑↓] Navigate | [Enter] Restore | [Esc] Cancel")
 
 		dialog := pickerStyle.Render(listDisplay)
@@ -1501,12 +1528,20 @@ func (a *App) View() string {
 		normalStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
+		// Get the current project folder name
+		projectFolder := filepath.Base(a.config.WorkspaceDir)
+
 		// Build file list display
 		var fileListDisplay string
 		fileListDisplay = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Render("Select a file to open:") + "\n\n"
+			Render("Select a file to open:") + "\n"
+
+		// Display project folder name
+		fileListDisplay += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Project: "+projectFolder) + "\n\n"
 
 		maxDisplay := 15 // Maximum files to display at once
 		startIdx := a.filePickerIndex - maxDisplay/2
@@ -1531,7 +1566,7 @@ func (a *App) View() string {
 		}
 
 		fileListDisplay += "\n" + lipgloss.NewStyle().
-			Foreground(lipgloss.Color("240")).
+			Foreground(lipgloss.Color("15")).
 			Render("[↑↓] Navigate | [Enter] Open | [Esc] Cancel")
 
 		dialog := pickerStyle.Render(fileListDisplay)
@@ -1549,7 +1584,14 @@ func (a *App) View() string {
 			Width(60).
 			Align(lipgloss.Center)
 
-		promptText := "Enter filename to create/open:\n\n" + a.filePromptBuffer + "█\n\n[Enter] to confirm, [Esc] to cancel"
+		// Get the current project folder name
+		projectFolder := filepath.Base(a.config.WorkspaceDir)
+
+		promptText := "Enter filename to create/open:\n"
+		promptText += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Project: "+projectFolder) + "\n\n"
+		promptText += a.filePromptBuffer + "█\n\n[Enter] to confirm, [Esc] to cancel"
 
 		dialog := promptStyle.Render(promptText)
 

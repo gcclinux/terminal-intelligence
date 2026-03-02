@@ -20,6 +20,14 @@ func NewFileManager(workspaceDir string) *FileManager {
 	}
 }
 
+// SetWorkspaceDir updates the workspace directory.
+// This should be called when the IDE changes workspace (e.g., after a clone operation).
+func (fm *FileManager) SetWorkspaceDir(dir string) {
+	if dir != "" {
+		fm.workspaceDir = dir
+	}
+}
+
 // CreateFile creates a new file with optional initial content
 func (fm *FileManager) CreateFile(filePath string, content string) error {
 	fullPath := fm.resolvePath(filePath)

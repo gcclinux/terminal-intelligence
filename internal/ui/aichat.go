@@ -225,6 +225,15 @@ func (a *AIChatPane) SetWorkingDir(dir string) {
 	}
 }
 
+// SetWorkspaceRoot updates the workspace root directory.
+// This should be called when the IDE changes workspace (e.g., after a clone operation).
+func (a *AIChatPane) SetWorkspaceRoot(root string) {
+	if root != "" {
+		a.workspaceRoot = root
+		a.workingDir = root
+	}
+}
+
 // GetSelectedBlockDir returns the effective working directory for the currently
 // selected code block. If no directory mapping exists, returns workspaceRoot.
 func (a *AIChatPane) GetSelectedBlockDir() string {
