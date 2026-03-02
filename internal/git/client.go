@@ -106,6 +106,7 @@ func (c *Client) DetectRepository() (*RepositoryInfo, error) {
 
 	return info, nil
 }
+
 // createAuth creates an HTTP basic authentication object for go-git operations.
 // It detects GitHub Personal Access Tokens (PAT) by checking for the "ghp_" prefix.
 // For GitHub PATs, the username can be any non-empty string (GitHub ignores it when using PATs).
@@ -147,6 +148,7 @@ func createAuth(username, password string) *http.BasicAuth {
 		Password: password,
 	}
 }
+
 // Clone clones a Git repository from the specified URL to a target directory.
 // If targetDir is empty, it derives the directory name from the repository URL.
 // If the target directory already exists, it appends a numeric suffix to create a unique name.
@@ -206,6 +208,7 @@ func (c *Client) Clone(url, username, password, targetDir string) (*OperationRes
 		Error:   nil,
 	}, nil
 }
+
 // Pull fetches changes from the remote repository and merges them into the current branch.
 // It opens an existing repository in the working directory, gets the worktree, and performs
 // a pull operation with the provided credentials.
@@ -301,6 +304,7 @@ func (c *Client) Pull(username, password string) (*OperationResult, error) {
 		Error:   nil,
 	}, nil
 }
+
 // Push pushes local commits to the remote repository.
 // It opens an existing repository in the working directory and performs a push operation
 // with the provided credentials.
@@ -340,11 +344,46 @@ func (c *Client) Push(username, password string) (*OperationResult, error) {
 	if err != nil {
 		// "already up-to-date" is not an error condition
 		if err == git.NoErrAlreadyUpToDate {
+			// Check if we have uncommitted/unstaged changes to provide a more helpful message
+			worktree, errWt := repo.Worktree()
+			if errWt == nil {
+				status, errSt := worktree.Status()
+				if errSt == nil {
+					hasStaged := false
+					hasUnstaged := false
+					for _, fileStatus := range status {
+						if fileStatus.Staging != git.Unmodified && fileStatus.Staging != git.Untracked {
+							hasStaged = true
+						}
+						if fileStatus.Worktree != git.Unmodified && fileStatus.Worktree != git.Untracked {
+							hasUnstaged = true
+						} else if fileStatus.Worktree == git.Untracked {
+							hasUnstaged = true
+						}
+					}
+
+					if hasStaged {
+						return &OperationResult{
+							Success: false,
+							Message: "",
+							Error:   fmt.Errorf("nothing to push. You have staged files that need to be committed first"),
+						}, fmt.Errorf("nothing to push. You have staged files that need to be committed first")
+					}
+					if hasUnstaged {
+						return &OperationResult{
+							Success: false,
+							Message: "",
+							Error:   fmt.Errorf("nothing to push. You have unstaged files that need to be staged and committed first"),
+						}, fmt.Errorf("nothing to push. You have unstaged files that need to be staged and committed first")
+					}
+				}
+			}
+
 			return &OperationResult{
-				Success: true,
-				Message: "Already up-to-date",
-				Error:   nil,
-			}, nil
+				Success: false,
+				Message: "",
+				Error:   fmt.Errorf("nothing to push (already up-to-date)"),
+			}, fmt.Errorf("nothing to push (already up-to-date)")
 		}
 
 		// Categorize and return the error
@@ -376,6 +415,7 @@ func (c *Client) Push(username, password string) (*OperationResult, error) {
 		Error:   nil,
 	}, nil
 }
+
 // Fetch fetches changes from the remote repository without merging them.
 // It opens an existing repository in the working directory and performs a fetch operation
 // with the provided credentials. This allows reviewing updates before integrating them.
@@ -564,10 +604,10 @@ func categorizeError(err error) error {
 
 	// Check for authentication errors
 	if strings.Contains(errMsg, "authentication") ||
-	   strings.Contains(errMsg, "401") ||
-	   strings.Contains(errMsg, "403") ||
-	   strings.Contains(errMsg, "unauthorized") ||
-	   strings.Contains(errMsg, "forbidden") {
+		strings.Contains(errMsg, "401") ||
+		strings.Contains(errMsg, "403") ||
+		strings.Contains(errMsg, "unauthorized") ||
+		strings.Contains(errMsg, "forbidden") {
 		return &GitError{
 			Category: "Authentication",
 			Message:  "Authentication failed: " + errMsg,
@@ -578,10 +618,10 @@ func categorizeError(err error) error {
 
 	// Check for network errors
 	if strings.Contains(errMsg, "timeout") ||
-	   strings.Contains(errMsg, "connection") ||
-	   strings.Contains(errMsg, "network") ||
-	   strings.Contains(errMsg, "dial") ||
-	   strings.Contains(errMsg, "DNS") {
+		strings.Contains(errMsg, "connection") ||
+		strings.Contains(errMsg, "network") ||
+		strings.Contains(errMsg, "dial") ||
+		strings.Contains(errMsg, "DNS") {
 		return &GitError{
 			Category: "Network",
 			Message:  "Network error: " + errMsg,
@@ -592,8 +632,8 @@ func categorizeError(err error) error {
 
 	// Check for repository not found
 	if strings.Contains(errMsg, "404") ||
-	   strings.Contains(errMsg, "not found") ||
-	   strings.Contains(errMsg, "repository not found") {
+		strings.Contains(errMsg, "not found") ||
+		strings.Contains(errMsg, "repository not found") {
 		return &GitError{
 			Category: "Git Operation",
 			Message:  "Git operation failed: Repository not found (404)",
@@ -685,6 +725,14 @@ func (c *Client) Stage() (*OperationResult, error) {
 		}
 	}
 
+	if fileCount == 0 {
+		return &OperationResult{
+			Success: false,
+			Message: "",
+			Error:   fmt.Errorf("no unstaged files to stage"),
+		}, fmt.Errorf("no unstaged files to stage")
+	}
+
 	// Stage all files using "." pattern (stages everything)
 	err = worktree.AddWithOptions(&git.AddOptions{
 		All: true,
@@ -761,8 +809,8 @@ func (c *Client) Commit(message string) (*OperationResult, error) {
 		return &OperationResult{
 			Success: false,
 			Message: "",
-			Error:   fmt.Errorf("no changes staged for commit"),
-		}, fmt.Errorf("no changes staged for commit")
+			Error:   fmt.Errorf("no staged files ready for commit"),
+		}, fmt.Errorf("no staged files ready for commit")
 	}
 
 	// Use default message if empty
@@ -848,7 +896,7 @@ func (c *Client) Status() (*OperationResult, error) {
 	for filename, fileStatus := range status {
 		// Each file should appear in exactly one list
 		// Priority: untracked > staged > modified
-		
+
 		if fileStatus.Worktree == git.Untracked {
 			// Untracked files (new files not added to staging)
 			untracked = append(untracked, filename)

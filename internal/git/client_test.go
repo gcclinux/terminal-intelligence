@@ -271,7 +271,7 @@ func TestDetectRepository(t *testing.T) {
 		// Add multiple remotes
 		originURL := "https://github.com/test/repo.git"
 		upstreamURL := "https://github.com/upstream/repo.git"
-		
+
 		_, err = repo.CreateRemote(&config.RemoteConfig{
 			Name: "origin",
 			URLs: []string{originURL},
@@ -460,9 +460,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("username and password authentication", func(t *testing.T) {
 		username := "testuser"
 		password := "testpassword"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -477,9 +477,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("GitHub PAT with username", func(t *testing.T) {
 		username := "testuser"
 		password := "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -494,9 +494,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("GitHub PAT without username", func(t *testing.T) {
 		username := ""
 		password := "ghp_1234567890abcdefghijklmnopqrstuvwxyz"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -512,9 +512,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("empty username and regular password", func(t *testing.T) {
 		username := ""
 		password := "regularpassword"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -530,9 +530,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("GitHub PAT prefix detection - exact prefix", func(t *testing.T) {
 		username := ""
 		password := "ghp_"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -548,9 +548,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("short password that looks like PAT prefix", func(t *testing.T) {
 		username := ""
 		password := "ghp"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -566,9 +566,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("password starting with ghp but not underscore", func(t *testing.T) {
 		username := ""
 		password := "ghpXsomepassword"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -584,9 +584,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("empty username and empty password", func(t *testing.T) {
 		username := ""
 		password := ""
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -601,9 +601,9 @@ func TestCreateAuth(t *testing.T) {
 	t.Run("GitHub PAT with special characters", func(t *testing.T) {
 		username := "user@example.com"
 		password := "ghp_AbCdEf123456!@#$%^&*()"
-		
+
 		auth := createAuth(username, password)
-		
+
 		if auth == nil {
 			t.Fatal("Expected createAuth to return non-nil auth")
 		}
@@ -741,9 +741,9 @@ func TestDetermineCloneDir(t *testing.T) {
 
 		client := NewClient(tempDir)
 		targetDir := "/custom/target/path"
-		
+
 		result := client.determineCloneDir("https://github.com/user/repo.git", targetDir)
-		
+
 		if result != targetDir {
 			t.Errorf("Expected %q, got %q", targetDir, result)
 		}
@@ -757,9 +757,9 @@ func TestDetermineCloneDir(t *testing.T) {
 		defer os.RemoveAll(tempDir)
 
 		client := NewClient(tempDir)
-		
+
 		result := client.determineCloneDir("https://github.com/user/myrepo.git", "")
-		
+
 		expected := filepath.Join(tempDir, "myrepo")
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
@@ -780,9 +780,9 @@ func TestDetermineCloneDir(t *testing.T) {
 		}
 
 		client := NewClient(tempDir)
-		
+
 		result := client.determineCloneDir("https://github.com/user/myrepo.git", "")
-		
+
 		expected := filepath.Join(tempDir, "myrepo-2")
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
@@ -811,9 +811,9 @@ func TestDetermineCloneDir(t *testing.T) {
 		}
 
 		client := NewClient(tempDir)
-		
+
 		result := client.determineCloneDir("https://github.com/user/myrepo.git", "")
-		
+
 		expected := filepath.Join(tempDir, "myrepo-6")
 		if result != expected {
 			t.Errorf("Expected %q, got %q", expected, result)
@@ -860,7 +860,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("authentication error - 401", func(t *testing.T) {
 		err := fmt.Errorf("remote: Invalid username or password. 401")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -879,7 +879,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("authentication error - 403", func(t *testing.T) {
 		err := fmt.Errorf("remote: Permission denied. 403")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -892,7 +892,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("authentication error - unauthorized", func(t *testing.T) {
 		err := fmt.Errorf("authentication required: unauthorized")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -905,7 +905,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("network error - timeout", func(t *testing.T) {
 		err := fmt.Errorf("dial tcp: i/o timeout")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -921,7 +921,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("network error - connection refused", func(t *testing.T) {
 		err := fmt.Errorf("dial tcp: connection refused")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -934,7 +934,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("git operation error - 404", func(t *testing.T) {
 		err := fmt.Errorf("repository not found: 404")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -950,7 +950,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("generic git operation error", func(t *testing.T) {
 		err := fmt.Errorf("some other git error")
 		result := categorizeError(err)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -966,7 +966,7 @@ func TestCategorizeError(t *testing.T) {
 	t.Run("error unwrapping", func(t *testing.T) {
 		originalErr := fmt.Errorf("original error")
 		result := categorizeError(originalErr)
-		
+
 		gitErr, ok := result.(*GitError)
 		if !ok {
 			t.Fatal("Expected GitError type")
@@ -993,7 +993,7 @@ func TestClone(t *testing.T) {
 		if err := os.Mkdir(sourceDir, 0755); err != nil {
 			t.Fatalf("Failed to create source dir: %v", err)
 		}
-		
+
 		// Initialize source repository with a commit
 		createTestRepoWithCommit(t, sourceDir)
 
@@ -1002,7 +1002,7 @@ func TestClone(t *testing.T) {
 		if err := os.Mkdir(targetParent, 0755); err != nil {
 			t.Fatalf("Failed to create target parent dir: %v", err)
 		}
-		
+
 		client := NewClient(targetParent)
 
 		// Clone the repository (using file:// protocol for local clone)
@@ -1216,7 +1216,7 @@ func TestProperty6_CloneWithUniqueNames(t *testing.T) {
 			// Clone the repository multiple times
 			for i := uint8(0); i < numClones; i++ {
 				result, err := client.Clone("file://"+sourceDir, "", "", "")
-				
+
 				if err != nil {
 					t.Logf("Clone %d failed: %v", i+1, err)
 					return false
@@ -1594,15 +1594,17 @@ func TestPush(t *testing.T) {
 		// Push to the repository (should be already up-to-date)
 		result, err := clonedClient.Push("", "")
 
-		// Verify the push succeeded with "already up-to-date" message
-		if err != nil {
-			t.Fatalf("Push failed: %v", err)
+		// Verify the push fails with "nothing to push (already up-to-date)" message
+		if err == nil {
+			t.Error("Expected error for already up-to-date repository")
 		}
-		if !result.Success {
-			t.Error("Expected Success to be true")
+		if result.Success {
+			t.Error("Expected Success to be false")
 		}
-		if result.Message != "Already up-to-date" {
-			t.Errorf("Expected 'Already up-to-date' message, got %q", result.Message)
+		if result.Error == nil {
+			t.Error("Expected Error to be non-nil")
+		} else if !strings.Contains(result.Error.Error(), "nothing to push") {
+			t.Errorf("Expected 'nothing to push' error, got %v", result.Error)
 		}
 	})
 }
@@ -2021,12 +2023,12 @@ func TestProperty10_StageOperationCompleteness(t *testing.T) {
 				filename := fmt.Sprintf("file%d.txt", i)
 				filepath := filepath.Join(tempDir, filename)
 				content := fmt.Sprintf("content for file %d", i)
-				
+
 				if err := os.WriteFile(filepath, []byte(content), 0644); err != nil {
 					t.Logf("Failed to create file %s: %v", filename, err)
 					return false
 				}
-				
+
 				createdFiles[i] = filename
 			}
 
@@ -2186,18 +2188,18 @@ func TestProperty11_StatusOperationCompleteness(t *testing.T) {
 			for i := uint8(0); i < numModified; i++ {
 				filename := fmt.Sprintf("modified%d.txt", i)
 				filepath := filepath.Join(tempDir, filename)
-				
+
 				// Create and commit the file first
 				if err := os.WriteFile(filepath, []byte("original content"), 0644); err != nil {
 					t.Logf("Failed to create file %s: %v", filename, err)
 					return false
 				}
-				
+
 				if _, err := worktree.Add(filename); err != nil {
 					t.Logf("Failed to stage file %s: %v", filename, err)
 					return false
 				}
-				
+
 				_, err = worktree.Commit(fmt.Sprintf("Add %s", filename), &git.CommitOptions{
 					Author: &object.Signature{
 						Name:  "Test User",
@@ -2209,13 +2211,13 @@ func TestProperty11_StatusOperationCompleteness(t *testing.T) {
 					t.Logf("Failed to commit file %s: %v", filename, err)
 					return false
 				}
-				
+
 				// Now modify it
 				if err := os.WriteFile(filepath, []byte("modified content"), 0644); err != nil {
 					t.Logf("Failed to modify file %s: %v", filename, err)
 					return false
 				}
-				
+
 				modifiedFiles = append(modifiedFiles, filename)
 			}
 
@@ -2223,17 +2225,17 @@ func TestProperty11_StatusOperationCompleteness(t *testing.T) {
 			for i := uint8(0); i < numStaged; i++ {
 				filename := fmt.Sprintf("staged%d.txt", i)
 				filepath := filepath.Join(tempDir, filename)
-				
+
 				if err := os.WriteFile(filepath, []byte("staged content"), 0644); err != nil {
 					t.Logf("Failed to create staged file %s: %v", filename, err)
 					return false
 				}
-				
+
 				if _, err := worktree.Add(filename); err != nil {
 					t.Logf("Failed to stage file %s: %v", filename, err)
 					return false
 				}
-				
+
 				stagedFiles = append(stagedFiles, filename)
 			}
 
@@ -2241,12 +2243,12 @@ func TestProperty11_StatusOperationCompleteness(t *testing.T) {
 			for i := uint8(0); i < numUntracked; i++ {
 				filename := fmt.Sprintf("untracked%d.txt", i)
 				filepath := filepath.Join(tempDir, filename)
-				
+
 				if err := os.WriteFile(filepath, []byte("untracked content"), 0644); err != nil {
 					t.Logf("Failed to create untracked file %s: %v", filename, err)
 					return false
 				}
-				
+
 				untrackedFiles = append(untrackedFiles, filename)
 			}
 
@@ -2364,17 +2366,17 @@ func TestProperty12_RestoreOperationRevertsChanges(t *testing.T) {
 				filename := fmt.Sprintf("file%d.txt", i)
 				filepath := filepath.Join(tempDir, filename)
 				originalContent := fmt.Sprintf("original content %d", i)
-				
+
 				if err := os.WriteFile(filepath, []byte(originalContent), 0644); err != nil {
 					t.Logf("Failed to create file %s: %v", filename, err)
 					return false
 				}
-				
+
 				if _, err := worktree.Add(filename); err != nil {
 					t.Logf("Failed to stage file %s: %v", filename, err)
 					return false
 				}
-				
+
 				committedFiles[filename] = originalContent
 			}
 
@@ -2395,7 +2397,7 @@ func TestProperty12_RestoreOperationRevertsChanges(t *testing.T) {
 			for filename := range committedFiles {
 				filepath := filepath.Join(tempDir, filename)
 				modifiedContent := fmt.Sprintf("modified content for %s", filename)
-				
+
 				if err := os.WriteFile(filepath, []byte(modifiedContent), 0644); err != nil {
 					t.Logf("Failed to modify file %s: %v", filename, err)
 					return false
@@ -2499,7 +2501,7 @@ func TestProperty19_AuthenticationValidationBeforeOperation(t *testing.T) {
 			// Try to clone from a non-existent repository URL
 			// This will fail quickly without network delays
 			nonExistentURL := "https://github.com/nonexistent-org-12345/nonexistent-repo-67890.git"
-			
+
 			result, err := client.Clone(nonExistentURL, username, password, "")
 
 			// Verify the operation failed
@@ -2968,7 +2970,7 @@ func TestProperty17_CredentialPersistenceAfterSuccess(t *testing.T) {
 			// Perform pull (will fail due to no actual remote, but credentials should still be saved)
 			// For this test, we'll just verify the credential saving logic works
 			// We can't test actual pull without a real remote, so we'll test the save mechanism directly
-			
+
 			// Simulate successful pull by directly saving credentials
 			store := NewStore(tempDir)
 			err = store.Save(&Credentials{
@@ -3204,7 +3206,7 @@ func TestCredentialPersistence_SaveErrorsDoNotFailOperation(t *testing.T) {
 	username := "testuser"
 	password := "testpassword"
 	result, err := client.Clone("file://"+sourceDir, username, password, "")
-	
+
 	// The clone operation should succeed even if credential saving fails
 	// (In this case, credential saving should succeed, but the operation should not fail)
 	if err != nil {
