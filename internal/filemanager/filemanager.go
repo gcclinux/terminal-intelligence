@@ -265,7 +265,7 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 }
 
 // SearchFilesContent searches for text within the workspace, trying multiple search terms in order of specificity.
-func (fm *FileManager) SearchFilesContent(searchTerms []string) ([]string, error) {
+func (fm *FileManager) SearchFilesContent(searchTerms []string) ([]string, []string, error) {
 	var exactResults []string
 	var tokenResults []string
 
@@ -337,21 +337,29 @@ func (fm *FileManager) SearchFilesContent(searchTerms []string) ([]string, error
 			return nil
 		}
 
-		// 1. Exact Match on any term
-		matchedExact := false
-		for _, term := range lowerTerms {
-			if strings.Contains(lowerContent, term) {
-				exactResults = append(exactResults, relPath)
-				matchedExact = true
-				break
-			}
-		}
-
-		if matchedExact {
+		// 1. Exact Match on PRIMARY term only
+		if len(lowerTerms) > 0 && strings.Contains(lowerContent, lowerTerms[0]) {
+			exactResults = append(exactResults, relPath)
 			return nil
 		}
 
-		// 2. Tokenized/Fuzzy match on any token set (fallback)
+		// 2. Match on alternative variations
+		matchedAlt := false
+		if len(lowerTerms) > 1 {
+			for _, term := range lowerTerms[1:] {
+				if strings.Contains(lowerContent, term) {
+					tokenResults = append(tokenResults, relPath)
+					matchedAlt = true
+					break
+				}
+			}
+		}
+
+		if matchedAlt {
+			return nil
+		}
+
+		// 3. Tokenized/Fuzzy match on any token set (fallback)
 		for _, tokens := range tokenSets {
 			allMatched := true
 			for _, token := range tokens {
@@ -370,13 +378,10 @@ func (fm *FileManager) SearchFilesContent(searchTerms []string) ([]string, error
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to search files: %w", err)
+		return nil, nil, fmt.Errorf("failed to search files: %w", err)
 	}
 
-	if len(exactResults) > 0 {
-		return exactResults, nil
-	}
-	return tokenResults, nil
+	return exactResults, tokenResults, nil
 }
 
 // ListDirectories returns a list of subdirectories in the given directory

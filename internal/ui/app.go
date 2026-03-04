@@ -90,6 +90,9 @@ type App struct {
 	statusMessage             string                    // Status bar message
 	pendingCodeInsert         string                    // Code waiting to be inserted after file creation
 	buildNumber               string                    // Build number from git commits
+	searchResults             []string                  // Files found in last search
+	searchResultIndex         int                       // Current index in searchResults
+	searchTerms               []string                  // Last search terms used
 }
 
 // New creates a new application instance with the provided configuration.
@@ -171,6 +174,9 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		showExitConfirmation: false,
 		forceQuit:            false,
 		buildNumber:          buildNumber,
+		searchResults:        []string{},
+		searchResultIndex:    0,
+		searchTerms:          []string{},
 	}
 }
 
@@ -547,36 +553,48 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case SearchCompleteMsg:
 		a.aiPane.streaming = false
-		if len(msg.Results) > 0 {
-			// Open the first matching file
-			fullPath := filepath.Join(a.config.WorkspaceDir, msg.Results[0])
-			err := a.editorPane.LoadFile(fullPath)
-			if err != nil {
-				a.statusMessage = "Error opening found file: " + err.Error()
-				a.aiPane.DisplayNotification("Found matches for '" + msg.SearchTerm + "', but failed to open " + msg.Results[0])
-			} else {
-				a.statusMessage = "Opened: " + msg.Results[0]
-				a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
+		totalResults := len(msg.ExactResults) + len(msg.AltResults)
+		if totalResults > 0 {
+			a.searchResults = append(msg.ExactResults, msg.AltResults...)
+			a.searchTerms = strings.Split(msg.SearchTerm, ", ")
+			a.searchResultIndex = 0
 
-				// Switch to editor pane
-				a.activePane = types.EditorPaneType
-				a.editorPane.focused = true
-				a.aiPane.focused = false
+			a.openSearchResult()
 
-				var chatMsg strings.Builder
-				chatMsg.WriteString(fmt.Sprintf("🔍 Found '%s' in %d file(s):\n", msg.SearchTerm, len(msg.Results)))
-				for i, res := range msg.Results {
-					if i >= 5 {
-						chatMsg.WriteString(fmt.Sprintf("- ... and %d more\n", len(msg.Results)-5))
+			var chatMsg strings.Builder
+			chatMsg.WriteString(fmt.Sprintf("🔍 Found '%s' in %d file(s):\n", msg.SearchTerm, totalResults))
+
+			if len(msg.ExactResults) > 0 {
+				chatMsg.WriteString("Exact search pattern:\n")
+				for i, res := range msg.ExactResults {
+					if i >= 3 {
+						chatMsg.WriteString(fmt.Sprintf("- ... and %d more exact matches\n", len(msg.ExactResults)-3))
 						break
 					}
 					chatMsg.WriteString("- " + res + "\n")
 				}
-				chatMsg.WriteString("\nOpening the first match: " + msg.Results[0])
-				a.aiPane.DisplayNotification(chatMsg.String())
 			}
+
+			if len(msg.AltResults) > 0 {
+				chatMsg.WriteString("\nAlternative variations:\n")
+				for i, res := range msg.AltResults {
+					if i >= 3 {
+						chatMsg.WriteString(fmt.Sprintf("- ... and %d more\n", len(msg.AltResults)-3))
+						break
+					}
+					chatMsg.WriteString("- " + res + "\n")
+				}
+			}
+
+			matchType := "exact match"
+			if len(msg.ExactResults) == 0 {
+				matchType = "alternative variation"
+			}
+			chatMsg.WriteString(fmt.Sprintf("\nOpening the first match: %s (%s)", a.searchResults[0], matchType))
+			chatMsg.WriteString("\n\n*Tip: Use `Alt+N` (Next) and `Alt+P` (Previous) to jump between these files.*")
+			a.aiPane.DisplayNotification(chatMsg.String())
 		}
-		return a, nil
+		return a, tea.Batch(cmds...)
 
 	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg, ClearStatusMsg:
 		// Handle ClearStatusMsg
@@ -1064,6 +1082,31 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Clear AI chat history (New Chat)
 			a.aiPane.ClearHistory()
 			a.statusMessage = "AI chat history cleared"
+			a.searchResults = []string{}
+			return a, nil
+
+		case "alt+n":
+			if len(a.searchResults) > 0 {
+				a.searchResultIndex++
+				if a.searchResultIndex >= len(a.searchResults) {
+					a.searchResultIndex = 0 // loop back to start
+				}
+				a.openSearchResult()
+			} else {
+				a.statusMessage = "No search results to jump to"
+			}
+			return a, nil
+
+		case "alt+p":
+			if len(a.searchResults) > 0 {
+				a.searchResultIndex--
+				if a.searchResultIndex < 0 {
+					a.searchResultIndex = len(a.searchResults) - 1 // loop back to end
+				}
+				a.openSearchResult()
+			} else {
+				a.statusMessage = "No search results to jump to"
+			}
 			return a, nil
 
 		case "ctrl+h":
@@ -2190,7 +2233,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				}
 			}
 
-			results, err := a.fileManager.SearchFilesContent(terms)
+			exactResults, altResults, err := a.fileManager.SearchFilesContent(terms)
 			if err != nil {
 				return AgenticFixResultMsg{
 					Result: &agentic.FixResult{
@@ -2201,7 +2244,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				}
 			}
 
-			if len(results) == 0 {
+			if len(exactResults) == 0 && len(altResults) == 0 {
 				return AgenticFixResultMsg{
 					Result: &agentic.FixResult{
 						Success:          false,
@@ -2212,8 +2255,9 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			}
 
 			return SearchCompleteMsg{
-				SearchTerm: strings.Join(terms, ", "),
-				Results:    results,
+				SearchTerm:   strings.Join(terms, ", "),
+				ExactResults: exactResults,
+				AltResults:   altResults,
 			}
 		}
 	}
@@ -2254,6 +2298,35 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 
 		return AgenticFixResultMsg{Result: result}
 	}
+}
+
+// openSearchResult opens the file at the current search result index and jumps to the matched term
+func (a *App) openSearchResult() {
+	if len(a.searchResults) == 0 || a.searchResultIndex < 0 || a.searchResultIndex >= len(a.searchResults) {
+		return
+	}
+
+	res := a.searchResults[a.searchResultIndex]
+	fullPath := filepath.Join(a.config.WorkspaceDir, res)
+
+	err := a.editorPane.LoadFile(fullPath)
+	if err != nil {
+		a.statusMessage = fmt.Sprintf("Error opening file %d/%d: %s", a.searchResultIndex+1, len(a.searchResults), err.Error())
+		return
+	}
+
+	a.statusMessage = fmt.Sprintf("Opened search match %d of %d: %s", a.searchResultIndex+1, len(a.searchResults), res)
+	a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
+
+	// Search and jump to the matched term inside the editor
+	if len(a.searchTerms) > 0 {
+		a.editorPane.SearchAndJump(a.searchTerms)
+	}
+
+	// Switch to editor pane
+	a.activePane = types.EditorPaneType
+	a.editorPane.focused = true
+	a.aiPane.focused = false
 }
 
 // ensureGoModule checks if a go.mod exists in the given directory and runs

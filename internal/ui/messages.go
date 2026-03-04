@@ -15,6 +15,7 @@ type AgenticFixResultMsg struct {
 
 // SearchCompleteMsg is sent when a workspace search completes.
 type SearchCompleteMsg struct {
-	SearchTerm string
-	Results    []string
+	SearchTerm   string
+	ExactResults []string
+	AltResults   []string
 }

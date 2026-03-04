@@ -247,11 +247,85 @@ func (e *EditorPane) HasUnsavedChanges() bool {
 // Returns:
 //   - string: The current line text
 func (e *EditorPane) GetCurrentLine() string {
-	lines := strings.Split(e.content, "\n")
+	content := e.GetContent()
+	lines := strings.Split(content, "\n")
+
+	if len(lines) == 0 {
+		return ""
+	}
+
 	if e.cursorLine >= 0 && e.cursorLine < len(lines) {
 		return lines[e.cursorLine]
 	}
+
 	return ""
+}
+
+// SearchAndJump finds the first occurrence of any of the search terms and jumps the cursor to it
+func (e *EditorPane) SearchAndJump(terms []string) {
+	if len(terms) == 0 || e.currentFile == nil {
+		return
+	}
+
+	// Prepare terms (lowercase for case-insensitive search, similar to filemanager)
+	var lowerTerms []string
+	var tokenSets [][]string
+	for _, t := range terms {
+		lower := strings.ToLower(strings.TrimSpace(t))
+		if lower != "" {
+			lowerTerms = append(lowerTerms, lower)
+			cleanTerm := strings.ReplaceAll(lower, "_", " ")
+			cleanTerm = strings.ReplaceAll(cleanTerm, "-", " ")
+			cleanTerm = strings.ReplaceAll(cleanTerm, ".", " ")
+			tokens := strings.Fields(cleanTerm)
+			if len(tokens) > 0 {
+				tokenSets = append(tokenSets, tokens)
+			}
+		}
+	}
+
+	contentLines := strings.Split(e.GetContent(), "\n")
+
+	for i, line := range contentLines {
+		lowerLine := strings.ToLower(line)
+
+		// Exact Match check
+		matched := false
+		for _, term := range lowerTerms {
+			if strings.Contains(lowerLine, term) {
+				matched = true
+				break
+			}
+		}
+
+		if !matched {
+			// Fuzzy token check
+			for _, tokens := range tokenSets {
+				allMatched := true
+				for _, token := range tokens {
+					if !strings.Contains(lowerLine, token) {
+						allMatched = false
+						break
+					}
+				}
+				if allMatched {
+					matched = true
+					break
+				}
+			}
+		}
+
+		if matched {
+			e.cursorLine = i
+			// Adjust scroll to center the match
+			e.scrollOffset = e.cursorLine - (e.height / 2)
+			if e.scrollOffset < 0 {
+				e.scrollOffset = 0
+			}
+			e.cursorCol = 0
+			return
+		}
+	}
 }
 
 // Update handles messages for the editor pane.
