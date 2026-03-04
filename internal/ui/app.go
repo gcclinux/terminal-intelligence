@@ -184,7 +184,10 @@ func New(config *types.AppConfig, buildNumber string) *App {
 // This is part of the Bubble Tea Model interface.
 // Currently returns nil as no initial commands are needed.
 func (a *App) Init() tea.Cmd {
-	return a.aiPane.CheckAIAvailability()
+	return tea.Batch(
+		a.aiPane.CheckAIAvailability(),
+		tea.EnableBracketedPaste,
+	)
 }
 
 // Update handles messages and updates application state.

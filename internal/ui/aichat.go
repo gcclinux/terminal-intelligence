@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/ai"
@@ -45,46 +46,47 @@ import (
 //   - DisplayNotification: Shows fix results with distinct styling
 //   - GetLastAssistantResponse: Retrieves last AI response for insertion
 type AIChatPane struct {
-	messages         []types.ChatMessage        // Conversation history
-	inputBuffer      string                     // Current input being typed
-	aiClient         ai.AIClient                // AI service client
-	model            string                     // AI model to use
-	provider         string                     // "ollama" or "gemini"
-	scrollOffset     int                        // Vertical scroll offset for responses
-	width            int                        // Pane width
-	height           int                        // Pane height
-	focused          bool                       // Whether this pane is focused
-	streaming        bool                       // Whether AI is currently generating
-	copyMode         bool                       // Whether in code block selection mode
-	viewMode         bool                       // Whether viewing a code block
-	codeBlocks       []string                   // Extracted code blocks from responses
-	selectedBlock    int                        // Currently selected code block index
-	lastSelectedCode string                     // Last selected code block content
-	lastKeyPressed   string                     // Last key pressed (for debugging)
-	activeArea       int                        // 0: Input, 1: Response
-	viewModeScroll   int                        // Scroll offset for code block view mode
-	viewModeScrollX  int                        // Horizontal scroll offset for code block view mode
-	configMode       bool                       // Whether in config editor mode
-	configFields     []string                   // Config field names
-	configValues     []string                   // Config field values
-	selectedField    int                        // Currently selected config field
-	editingField     bool                       // Whether currently editing a field
-	editBuffer       string                     // Buffer for editing field value
-	editCursorPos    int                        // Cursor position within edit buffer
-	terminalMode     bool                       // Whether terminal execution is active
-	cmdRunning       bool                       // Whether the command is currently running
-	terminalOutput   []string                   // Output lines from terminal execution
-	stdinWriter      io.WriteCloser             // Stdin pipe for sending input to running command
-	terminalInput    string                     // Current input line being typed in terminal mode
-	aiAvailable      bool                       // Whether the AI service is reachable
-	aiChecked        bool                       // Whether the availability check has completed
-	suggestedFile    string                     // Filename suggested by AI for the current code block
-	workingDir       string                     // Directory from which to execute commands
-	codeBlockInfos   []dirtracker.CodeBlockInfo // Code blocks with language tags
-	blockDirMappings []string                   // Effective dir per code block index
-	workspaceRoot    string                     // From AppConfig.WorkspaceDir
-	runningCmd       *exec.Cmd                  // Currently running command process (for kill support)
-	processKilled    bool                       // Whether the process was killed by user (Ctrl+K)
+	messages          []types.ChatMessage        // Conversation history
+	inputBuffer       string                     // Current input being typed
+	aiClient          ai.AIClient                // AI service client
+	model             string                     // AI model to use
+	provider          string                     // "ollama" or "gemini"
+	scrollOffset      int                        // Vertical scroll offset for responses
+	width             int                        // Pane width
+	height            int                        // Pane height
+	focused           bool                       // Whether this pane is focused
+	streaming         bool                       // Whether AI is currently generating
+	copyMode          bool                       // Whether in code block selection mode
+	viewMode          bool                       // Whether viewing a code block
+	codeBlocks        []string                   // Extracted code blocks from responses
+	selectedBlock     int                        // Currently selected code block index
+	lastSelectedCode  string                     // Last selected code block content
+	lastKeyPressed    string                     // Last key pressed (for debugging)
+	activeArea        int                        // 0: Input, 1: Response
+	viewModeScroll    int                        // Scroll offset for code block view mode
+	viewModeScrollX   int                        // Horizontal scroll offset for code block view mode
+	configMode        bool                       // Whether in config editor mode
+	configFields      []string                   // Config field names
+	configValues      []string                   // Config field values
+	selectedField     int                        // Currently selected config field
+	editingField      bool                       // Whether currently editing a field
+	editBuffer        string                     // Buffer for editing field value
+	editCursorPos     int                        // Cursor position within edit buffer
+	terminalMode      bool                       // Whether terminal execution is active
+	cmdRunning        bool                       // Whether the command is currently running
+	terminalOutput    []string                   // Output lines from terminal execution
+	stdinWriter       io.WriteCloser             // Stdin pipe for sending input to running command
+	terminalInput     string                     // Current input line being typed in terminal mode
+	aiAvailable       bool                       // Whether the AI service is reachable
+	aiChecked         bool                       // Whether the availability check has completed
+	suggestedFile     string                     // Filename suggested by AI for the current code block
+	workingDir        string                     // Directory from which to execute commands
+	codeBlockInfos    []dirtracker.CodeBlockInfo // Code blocks with language tags
+	blockDirMappings  []string                   // Effective dir per code block index
+	workspaceRoot     string                     // From AppConfig.WorkspaceDir
+	runningCmd        *exec.Cmd                  // Currently running command process (for kill support)
+	processKilled     bool                       // Whether the process was killed by user (Ctrl+K)
+	lastKeystrokeTime time.Time                  // Last keypress timestamp to detect rapid/terminal paste
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -201,20 +203,21 @@ func NewAIChatPane(client ai.AIClient, model string, provider string, workspaceR
 		workspaceRoot = cwd
 	}
 	return &AIChatPane{
-		messages:       []types.ChatMessage{},
-		inputBuffer:    "",
-		aiClient:       client,
-		model:          model,
-		provider:       provider,
-		scrollOffset:   0,
-		width:          0,
-		height:         0,
-		focused:        false,
-		streaming:      false,
-		activeArea:     0, // 0: Input, 1: Response
-		terminalOutput: []string{},
-		workingDir:     cwd,
-		workspaceRoot:  workspaceRoot,
+		messages:          []types.ChatMessage{},
+		inputBuffer:       "",
+		aiClient:          client,
+		model:             model,
+		provider:          provider,
+		scrollOffset:      0,
+		width:             0,
+		height:            0,
+		focused:           false,
+		streaming:         false,
+		activeArea:        0, // 0: Input, 1: Response
+		terminalOutput:    []string{},
+		workingDir:        cwd,
+		workspaceRoot:     workspaceRoot,
+		lastKeystrokeTime: time.Now(),
 	}
 }
 
@@ -1159,6 +1162,11 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	// Input area active - handle typing
+	now := time.Now()
+	isRapid := now.Sub(a.lastKeystrokeTime) < 25*time.Millisecond
+	a.lastKeystrokeTime = now
+
 	// Handle input based on active area
 	if a.activeArea == 1 {
 		// Response area active - handle scrolling
@@ -1192,7 +1200,21 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 	} else {
 		// Input area active - handle typing
 		switch msg.String() {
+		case "ctrl+v":
+			// Paste directly from clipboard into input buffer
+			content, err := clipboard.ReadAll()
+			if err == nil {
+				// Normalize line endings
+				content = strings.ReplaceAll(content, "\r\n", "\n")
+				a.inputBuffer += content
+			}
+			return nil
 		case "enter":
+			// Treat rapid enters (e.g., from native right-click paste) as newlines
+			if msg.Paste || isRapid {
+				a.inputBuffer += "\n"
+				return nil
+			}
 			// Send message when Enter is pressed
 			if a.inputBuffer != "" {
 				message := a.inputBuffer
@@ -1205,9 +1227,18 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		case "backspace":
 			// Delete last character from input buffer
 			if len(a.inputBuffer) > 0 {
-				a.inputBuffer = a.inputBuffer[:len(a.inputBuffer)-1]
+				runes := []rune(a.inputBuffer)
+				if len(runes) > 0 {
+					a.inputBuffer = string(runes[:len(runes)-1])
+				}
 			}
 		default:
+			if msg.Paste {
+				if len(msg.Runes) > 0 {
+					a.inputBuffer += string(msg.Runes)
+				}
+				return nil
+			}
 			// Add character to input buffer
 			// Check for printable characters to avoid control chars
 			if len(msg.String()) == 1 {
