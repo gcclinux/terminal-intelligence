@@ -31,6 +31,7 @@ func (a *App) renderHelpDialog() string {
 
 	// File section
 	leftColumn += sectionStyle.Render("── File ──────────────────────────────────────") + "\n"
+	leftColumn += keyStyle.Render("  Ctrl+W") + descStyle.Render("    Change Workspace / Open Folder") + "\n"
 	leftColumn += keyStyle.Render("  Ctrl+O") + descStyle.Render("    Open file") + "\n"
 	leftColumn += keyStyle.Render("  Ctrl+N") + descStyle.Render("    New file") + "\n"
 	leftColumn += keyStyle.Render("  Ctrl+S") + descStyle.Render("    Save file") + "\n"

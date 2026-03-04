@@ -261,6 +261,63 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 	return files, nil
 }
 
+// ListDirectories returns a list of subdirectories in the given directory
+func (fm *FileManager) ListDirectories(dirPath string) ([]string, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, err
+	}
+
+	var dirs []string
+	for _, entry := range entries {
+		if entry.IsDir() && entry.Name()[0] != '.' {
+			dirs = append(dirs, entry.Name())
+		}
+	}
+	return dirs, nil
+}
+
+// ListEntries returns directories and files in the given directory (non-recursive)
+func (fm *FileManager) ListEntries(dirPath string) ([]string, []string, error) {
+	entries, err := os.ReadDir(dirPath)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var dirs []string
+	var files []string
+
+	// Image extensions to exclude (same as ListFiles)
+	imageExts := map[string]bool{
+		".ico":  true,
+		".png":  true,
+		".jpg":  true,
+		".jpeg": true,
+		".bmp":  true,
+		".gif":  true,
+		".svg":  true,
+		".webp": true,
+	}
+
+	for _, entry := range entries {
+		name := entry.Name()
+		if name[0] == '.' {
+			continue // Skip hidden files/folders
+		}
+
+		if entry.IsDir() {
+			dirs = append(dirs, name)
+		} else {
+			ext := strings.ToLower(filepath.Ext(name))
+			if !imageExts[ext] {
+				files = append(files, name)
+			}
+		}
+	}
+
+	return dirs, files, nil
+}
+
 // resolvePath resolves a relative path to an absolute path within the workspace
 func (fm *FileManager) resolvePath(path string) string {
 	// Clean the path to prevent directory traversal

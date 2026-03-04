@@ -69,6 +69,7 @@ type App struct {
 	showExitConfirmation      bool                      // Whether exit confirmation dialog is showing
 	showFilePrompt            bool                      // Whether file creation prompt is showing
 	showFilePicker            bool                      // Whether file picker dialog is showing
+	showFolderPicker          bool                      // Whether folder picker dialog is showing
 	showBackupPicker          bool                      // Whether backup picker dialog is showing
 	showChatLoader            bool                      // Whether chat loader dialog is showing
 	showHelp                  bool                      // Whether help dialog is showing
@@ -77,9 +78,13 @@ type App struct {
 	fileTypeForInstall        string                    // File type that triggered install check
 	filePromptBuffer          string                    // Buffer for file name input
 	fileList                  []string                  // List of files for picker
+	folderList                []string                  // List of folders for picker
 	backupList                []string                  // List of backups for picker
 	chatList                  []string                  // List of saved chats for loader
 	filePickerIndex           int                       // Selected index in file picker
+	filePickerPath            string                    // Current path being browsed in file picker
+	folderPickerIndex         int                       // Selected index in folder picker
+	folderPickerPath          string                    // Current path being browsed in folder picker
 	forceQuit                 bool                      // Whether to quit without save confirmation
 	statusMessage             string                    // Status bar message
 	pendingCodeInsert         string                    // Code waiting to be inserted after file creation
@@ -323,6 +328,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.LanguageName {
 			case "Go":
 				output, err = langInstaller.InstallGo()
+			case "Python":
+				output, err = langInstaller.InstallPython()
 			default:
 				err = fmt.Errorf("unsupported language: %s", msg.LanguageName)
 			}
@@ -536,6 +543,69 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Handle folder picker dialog
+		if a.showFolderPicker {
+			switch msg.String() {
+			case "up", "k":
+				if a.folderPickerIndex > 0 {
+					a.folderPickerIndex--
+				}
+				return a, nil
+			case "down", "j":
+				if a.folderPickerIndex < len(a.folderList)-1 {
+					a.folderPickerIndex++
+				}
+				return a, nil
+			case "enter":
+				if len(a.folderList) > 0 && a.folderPickerIndex < len(a.folderList) {
+					selected := a.folderList[a.folderPickerIndex]
+
+					if selected == "[ Select Current Directory ]" {
+						// Set new workspace directory
+						newDir := a.folderPickerPath
+						a.config.WorkspaceDir = newDir
+
+						if err := os.Chdir(newDir); err != nil {
+							a.statusMessage = "Failed to change directory: " + err.Error()
+						} else {
+							a.fileManager.SetWorkspaceDir(newDir)
+							a.gitPane.SetWorkDir(newDir)
+							a.aiPane.SetWorkspaceRoot(newDir)
+							a.editorPane.CloseFile() // Close current file as it's outside new workspace
+							a.statusMessage = "Workspace changed to: " + newDir
+						}
+						a.showFolderPicker = false
+						a.folderList = nil
+						return a, nil
+					}
+
+					var nextDir string
+					if selected == ".. (Parent Directory)" {
+						nextDir = filepath.Dir(a.folderPickerPath)
+					} else {
+						nextDir = filepath.Join(a.folderPickerPath, selected)
+					}
+
+					// Refresh folder list for the new path
+					dirs, err := a.fileManager.ListDirectories(nextDir)
+					if err != nil {
+						a.statusMessage = "Error: " + err.Error()
+						return a, nil
+					}
+
+					a.folderPickerPath = nextDir
+					a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
+					a.folderPickerIndex = 0
+					return a, nil
+				}
+			case "esc":
+				a.showFolderPicker = false
+				a.folderList = nil
+				return a, nil
+			}
+			return a, nil
+		}
+
 		// Handle file picker dialog
 		if a.showFilePicker {
 			switch msg.String() {
@@ -550,28 +620,59 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				return a, nil
 			case "enter":
-				// Open selected file
+				// Open selected file or folder
 				if len(a.fileList) > 0 && a.filePickerIndex < len(a.fileList) {
-					selectedFile := a.fileList[a.filePickerIndex]
+					selected := a.fileList[a.filePickerIndex]
+
+					// If it ends with '/' or is '..', it's a directory
+					if strings.HasSuffix(selected, "/") || selected == ".." {
+						var nextDir string
+						if selected == ".." {
+							nextDir = filepath.Dir(a.filePickerPath)
+						} else {
+							nextDir = filepath.Join(a.filePickerPath, strings.TrimSuffix(selected, "/"))
+						}
+
+						// Refresh file list for the new path
+						dirs, files, err := a.fileManager.ListEntries(nextDir)
+						if err != nil {
+							a.statusMessage = "Error: " + err.Error()
+							return a, nil
+						}
+
+						var newList []string
+						newList = append(newList, "..")
+						for _, d := range dirs {
+							newList = append(newList, d+"/")
+						}
+						newList = append(newList, files...)
+
+						a.fileList = newList
+						a.filePickerPath = nextDir
+						a.filePickerIndex = 0
+						return a, nil
+					}
+
+					// It's a file, open it
+					fullPath := filepath.Join(a.filePickerPath, selected)
 
 					// Debug: Log the file being opened
-					a.statusMessage = "Opening: " + selectedFile
+					a.statusMessage = "Opening: " + selected
 
-					err := a.editorPane.LoadFile(selectedFile)
+					err := a.editorPane.LoadFile(fullPath)
 					if err != nil {
 						a.statusMessage = "Error opening file: " + err.Error()
 					} else {
-						a.statusMessage = "Successfully opened: " + selectedFile
+						a.statusMessage = "Successfully opened: " + selected
 						a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
 						// Switch to editor pane after opening file
 						a.activePane = types.EditorPaneType
 						a.editorPane.focused = true
 						a.aiPane.focused = false
+						a.showFilePicker = false
+						a.fileList = nil
 					}
 				}
-				a.showFilePicker = false
-				a.fileList = nil
-				a.filePickerIndex = 0
 				return a, nil
 			case "esc":
 				// Cancel file picker
@@ -845,20 +946,58 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "ctrl+o":
-			// Open file picker with list of existing files
-			files, err := a.fileManager.ListFiles()
+			// Open file picker starting from workspace root
+			startDir := a.config.WorkspaceDir
+			if startDir == "" {
+				home, _ := os.UserHomeDir()
+				startDir = home
+			}
+
+			dirs, files, err := a.fileManager.ListEntries(startDir)
 			if err != nil {
-				a.statusMessage = "Error listing files: " + err.Error()
+				a.statusMessage = "Error listing entries: " + err.Error()
 				return a, nil
 			}
-			if len(files) == 0 {
+
+			var fileList []string
+			// Add folders first (with / suffix)
+			fileList = append(fileList, "..")
+			for _, d := range dirs {
+				fileList = append(fileList, d+"/")
+			}
+			fileList = append(fileList, files...)
+
+			if len(fileList) == 1 && fileList[0] == ".." { // Only parent dir found?
 				a.statusMessage = "No files found in workspace"
-				return a, nil
+				// Still allow it if they want to navigate up?
 			}
-			a.fileList = files
+
+			a.fileList = fileList
+			a.filePickerPath = startDir
 			a.filePickerIndex = 0
 			a.showFilePicker = true
-			a.statusMessage = fmt.Sprintf("Found %d files", len(files))
+			a.statusMessage = "Select a file to open or folder to browse"
+			return a, nil
+
+		case "ctrl+w":
+			// Open folder picker
+			startDir := a.config.WorkspaceDir
+			if startDir == "" {
+				home, _ := os.UserHomeDir()
+				startDir = home
+			}
+
+			dirs, err := a.fileManager.ListDirectories(startDir)
+			if err != nil {
+				a.statusMessage = "Error listing directories: " + err.Error()
+				return a, nil
+			}
+
+			a.folderPickerPath = startDir
+			a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
+			a.folderPickerIndex = 0
+			a.showFolderPicker = true
+			a.statusMessage = "Select a folder to set as workspace"
 			return a, nil
 
 		case "ctrl+n":
@@ -1074,6 +1213,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 								if fileType == "go" {
 									a.ensureGoModule(filepath.Dir(a.editorPane.currentFile.Filepath))
 								}
+								if fileType == "python" {
+									a.ensurePythonVenv(filepath.Dir(a.editorPane.currentFile.Filepath))
+								}
 								if fileType == "go" || fileType == "python" {
 									return a, func() tea.Msg {
 										langName := "Go"
@@ -1108,6 +1250,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							fileType := a.editorPane.currentFile.FileType
 							if fileType == "go" {
 								a.ensureGoModule(filepath.Dir(a.editorPane.currentFile.Filepath))
+							}
+							if fileType == "python" {
+								a.ensurePythonVenv(filepath.Dir(a.editorPane.currentFile.Filepath))
 							}
 							if fileType == "go" || fileType == "python" {
 								return a, func() tea.Msg {
@@ -1167,7 +1312,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					runCmd = "pwsh -NoProfile -File " + filePath
 				}
 			case "python":
-				runCmd = "python3 " + filePath
+				// Use venv Python if available
+				runCmd = a.getPythonRunCommand(filePath)
 			case "go":
 				// For Go files, check if it's a test file or regular file
 				if strings.HasSuffix(filePath, "_test.go") {
@@ -1446,6 +1592,64 @@ func (a *App) View() string {
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
 	}
 
+	// Show folder picker dialog if needed
+	if a.showFolderPicker {
+		pickerStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(80).
+			Align(lipgloss.Left)
+
+		selectedStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Background(lipgloss.Color("62")).
+			Bold(true)
+
+		normalStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("252"))
+
+		var listDisplay string
+		listDisplay = lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("15")).
+			Render("Choose a directory for your workspace:") + "\n"
+
+		listDisplay += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Current: "+a.folderPickerPath) + "\n\n"
+
+		maxDisplay := 15
+		startIdx := a.folderPickerIndex - maxDisplay/2
+		if startIdx < 0 {
+			startIdx = 0
+		}
+		endIdx := startIdx + maxDisplay
+		if endIdx > len(a.folderList) {
+			endIdx = len(a.folderList)
+			startIdx = endIdx - maxDisplay
+			if startIdx < 0 {
+				startIdx = 0
+			}
+		}
+
+		for i := startIdx; i < endIdx; i++ {
+			displayName := a.folderList[i]
+			if i == a.folderPickerIndex {
+				listDisplay += selectedStyle.Render("> "+displayName) + "\n"
+			} else {
+				listDisplay += normalStyle.Render("  "+displayName) + "\n"
+			}
+		}
+
+		listDisplay += "\n" + lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("[↑↓] Navigate | [Enter] Open/Select | [Esc] Cancel")
+
+		dialog := pickerStyle.Render(listDisplay)
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
 	// Show backup picker dialog if needed
 	if a.showBackupPicker {
 		pickerStyle := lipgloss.NewStyle().
@@ -1528,20 +1732,17 @@ func (a *App) View() string {
 		normalStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("252"))
 
-		// Get the current project folder name
-		projectFolder := filepath.Base(a.config.WorkspaceDir)
-
 		// Build file list display
 		var fileListDisplay string
 		fileListDisplay = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(lipgloss.Color("15")).
-			Render("Select a file to open:") + "\n"
+			Render("Select a file to open or folder to browse:") + "\n"
 
-		// Display project folder name
+		// Display current folder path
 		fileListDisplay += lipgloss.NewStyle().
 			Foreground(lipgloss.Color("15")).
-			Render("Project: "+projectFolder) + "\n\n"
+			Render("Current Path: "+a.filePickerPath) + "\n\n"
 
 		maxDisplay := 15 // Maximum files to display at once
 		startIdx := a.filePickerIndex - maxDisplay/2
@@ -1625,11 +1826,11 @@ func (a *App) View() string {
 			Width(70).
 			Align(lipgloss.Center)
 
-		langInstaller := installer.NewLanguageInstaller()
-		installCmd, cmdText, _ := langInstaller.GetGoInstallCommand()
-
 		var promptText string
 		if a.languageToInstall == "Go" {
+			langInstaller := installer.NewLanguageInstaller()
+			installCmd, cmdText, _ := langInstaller.GetGoInstallCommand()
+
 			if installCmd == "direct" {
 				// Linux - direct download and install
 				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
@@ -1641,6 +1842,22 @@ func (a *App) View() string {
 				promptText += "• Requires sudo password\n\n"
 				promptText += "[Y]es to install / [N]o to cancel"
 			} else if installCmd == "manual" {
+				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+				promptText += "Manual installation required:\n"
+				promptText += cmdText + "\n\n"
+				promptText += "After installation, restart Terminal Intelligence.\n\n"
+				promptText += "[N]o / [Esc] to cancel"
+			} else {
+				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
+				promptText += fmt.Sprintf("Would you like to install %s automatically?\n\n", a.languageToInstall)
+				promptText += fmt.Sprintf("Installation command: %s\n\n", cmdText)
+				promptText += "[Y]es to install / [N]o to cancel"
+			}
+		} else if a.languageToInstall == "Python" {
+			langInstaller := installer.NewLanguageInstaller()
+			installCmd, cmdText, _ := langInstaller.GetPythonInstallCommand()
+
+			if installCmd == "manual" {
 				promptText = fmt.Sprintf("⚠  %s is not installed or not in PATH\n\n", a.languageToInstall)
 				promptText += "Manual installation required:\n"
 				promptText += cmdText + "\n\n"
@@ -1675,7 +1892,7 @@ func (a *App) View() string {
 		Padding(0, 1)
 
 	// Simplified status bar - details available via Ctrl+H help
-	statusText := "Ctrl+H: Help | Ctrl+O: Open | Ctrl+S: Save | Tab: Cycle Areas | Ctrl+Q: Quit"
+	statusText := "Ctrl+H: Help | Ctrl+W: Workspace | Ctrl+O: Open | Ctrl+S: Save | Tab: Cycle Areas | Ctrl+Q: Quit"
 
 	// Add AI-specific instructions when AI pane is focused
 	if a.activePane == types.AIPaneType || a.activePane == types.AIResponsePaneType {
@@ -1832,6 +2049,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "==================\n\n"
 		helpText += "File\n"
 		helpText += "----\n"
+		helpText += "  Ctrl+W    Change Workspace / Open Folder\n"
 		helpText += "  Ctrl+O    Open file\n"
 		helpText += "  Ctrl+N    New file\n"
 		helpText += "  Ctrl+S    Save file\n"
@@ -1958,6 +2176,122 @@ func (a *App) ensureGoModule(dir string) {
 		tidyCmd.Dir = dir
 		tidyCmd.Run()
 	}()
+}
+
+// ensurePythonVenv checks if a Python virtual environment exists in the given
+// directory and creates one if it doesn't. It also installs dependencies from
+// requirements.txt if present.
+func (a *App) ensurePythonVenv(dir string) {
+	go func() {
+		venvDir := filepath.Join(dir, "venv")
+
+		// Check if venv already exists
+		if _, err := os.Stat(venvDir); err == nil {
+			// venv exists — check if requirements.txt changed and re-install if needed
+			reqFile := filepath.Join(dir, "requirements.txt")
+			if _, err := os.Stat(reqFile); err == nil {
+				pipCmd := a.getPipCommand(dir)
+				installCmd := exec.Command(pipCmd, "install", "-r", reqFile)
+				installCmd.Dir = dir
+				installCmd.Run()
+			}
+			return
+		}
+
+		// Determine python command
+		pythonCmd := getPythonCommand()
+		if pythonCmd == "" {
+			return // Python not installed
+		}
+
+		// Create venv
+		createCmd := exec.Command(pythonCmd, "-m", "venv", "venv")
+		createCmd.Dir = dir
+		if err := createCmd.Run(); err != nil {
+			return // Failed to create venv
+		}
+
+		// Install requirements.txt if it exists
+		reqFile := filepath.Join(dir, "requirements.txt")
+		if _, err := os.Stat(reqFile); err == nil {
+			pipCmd := a.getPipCommand(dir)
+			installCmd := exec.Command(pipCmd, "install", "-r", reqFile)
+			installCmd.Dir = dir
+			installCmd.Run()
+		}
+	}()
+}
+
+// getPythonCommand returns the Python command available on the system.
+// Prefers python3 over python.
+func getPythonCommand() string {
+	if runtime.GOOS == "windows" {
+		// On Windows, try python first (common), then python3
+		if _, err := exec.LookPath("python"); err == nil {
+			return "python"
+		}
+		if _, err := exec.LookPath("python3"); err == nil {
+			return "python3"
+		}
+	} else {
+		// On Unix, prefer python3
+		if _, err := exec.LookPath("python3"); err == nil {
+			return "python3"
+		}
+		if _, err := exec.LookPath("python"); err == nil {
+			return "python"
+		}
+	}
+	return ""
+}
+
+// getVenvPython returns the path to the Python interpreter inside a venv.
+// Returns empty string if no venv exists in the directory.
+func getVenvPython(dir string) string {
+	var venvPython string
+	if runtime.GOOS == "windows" {
+		venvPython = filepath.Join(dir, "venv", "Scripts", "python.exe")
+	} else {
+		venvPython = filepath.Join(dir, "venv", "bin", "python")
+	}
+	if _, err := os.Stat(venvPython); err == nil {
+		return venvPython
+	}
+	return ""
+}
+
+// getPipCommand returns the pip command to use, preferring the venv pip.
+func (a *App) getPipCommand(dir string) string {
+	var venvPip string
+	if runtime.GOOS == "windows" {
+		venvPip = filepath.Join(dir, "venv", "Scripts", "pip.exe")
+	} else {
+		venvPip = filepath.Join(dir, "venv", "bin", "pip")
+	}
+	if _, err := os.Stat(venvPip); err == nil {
+		return venvPip
+	}
+	// Fallback to system pip
+	if runtime.GOOS == "windows" {
+		return "pip"
+	}
+	return "pip3"
+}
+
+// getPythonRunCommand returns the command to run a Python file, using the venv
+// Python if available, otherwise falling back to the system Python.
+func (a *App) getPythonRunCommand(filePath string) string {
+	dir := filepath.Dir(filePath)
+	venvPython := getVenvPython(dir)
+	if venvPython != "" {
+		return venvPython + " " + filePath
+	}
+	// Fallback to system python
+	pythonCmd := getPythonCommand()
+	if pythonCmd == "" {
+		pythonCmd = "python3" // default fallback
+	}
+	return pythonCmd + " " + filePath
 }
 
 // loadChatHistory parses a saved chat file and loads it into the AI pane
