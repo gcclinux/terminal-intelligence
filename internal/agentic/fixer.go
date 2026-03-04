@@ -220,6 +220,71 @@ func (f *AgenticCodeFixer) IsFixRequest(message string) FixDetectionResult {
 	}
 }
 
+// IsSearchRequest determines if a user message is asking to find or search for a file
+func (f *AgenticCodeFixer) IsSearchRequest(message string) bool {
+	lowerMsg := strings.ToLower(strings.TrimSpace(message))
+
+	searchPrefixes := []string{
+		"/search ",
+		"/find ",
+		"find where ",
+		"where do i ",
+		"where can i ",
+		"search for ",
+		"where is ",
+		"find file ",
+		"how to find ",
+		"which file ",
+		"locate file ",
+		"what file ",
+	}
+
+	for _, prefix := range searchPrefixes {
+		if strings.HasPrefix(lowerMsg, prefix) {
+			return true
+		}
+	}
+
+	if strings.Contains(lowerMsg, "find where") || strings.Contains(lowerMsg, "where is") || strings.Contains(lowerMsg, "which file") || strings.Contains(lowerMsg, "locate file") || strings.Contains(lowerMsg, "what file") {
+		return true
+	}
+
+	return false
+}
+
+// ExtractSearchTerms uses the AI model to extract search term variations from a natural language request
+func (f *AgenticCodeFixer) ExtractSearchTerms(message string) ([]string, error) {
+	prompt := fmt.Sprintf("Analyze the following user request to find a specific file or code snippet.\n\nUser Request: %q\n\nExtract a comma-separated list of search queries to try, ordered from most specific to least specific. Include base variations of words (e.g., 'tokenized' -> 'token', 'prefixes' -> 'prefix') and synonyms. Output ONLY the raw comma-separated list without quotes, explanations, or markdown. Example: tokenized search pattern, token search pattern, search pattern, token, search", message)
+
+	responseChan, err := f.aiClient.Generate(prompt, f.model, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var termBuilder strings.Builder
+	for chunk := range responseChan {
+		termBuilder.WriteString(chunk)
+	}
+
+	termString := strings.TrimSpace(termBuilder.String())
+	termString = strings.Trim(termString, "\"'`")
+
+	rawTerms := strings.Split(termString, ",")
+	var terms []string
+	for _, t := range rawTerms {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			terms = append(terms, t)
+		}
+	}
+
+	if len(terms) == 0 {
+		return nil, fmt.Errorf("no search terms generated")
+	}
+
+	return terms, nil
+}
+
 // BuildPrompt constructs a structured prompt for the AI model
 // It combines the user's request with file context and provides clear instructions
 // for generating code fixes.

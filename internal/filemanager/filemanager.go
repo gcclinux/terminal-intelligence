@@ -264,6 +264,121 @@ func (fm *FileManager) ListFiles() ([]string, error) {
 	return files, nil
 }
 
+// SearchFilesContent searches for text within the workspace, trying multiple search terms in order of specificity.
+func (fm *FileManager) SearchFilesContent(searchTerms []string) ([]string, error) {
+	var exactResults []string
+	var tokenResults []string
+
+	var lowerTerms []string
+	var tokenSets [][]string
+
+	for _, term := range searchTerms {
+		lower := strings.ToLower(term)
+		lowerTerms = append(lowerTerms, lower)
+
+		// Clean up tokens by removing common delimiters
+		cleanTerm := lower
+		cleanTerm = strings.ReplaceAll(cleanTerm, "_", " ")
+		cleanTerm = strings.ReplaceAll(cleanTerm, "-", " ")
+		cleanTerm = strings.ReplaceAll(cleanTerm, ".", " ")
+		tokens := strings.Fields(cleanTerm)
+		if len(tokens) > 0 {
+			tokenSets = append(tokenSets, tokens)
+		}
+	}
+
+	// Extensions to exclude
+	excludedExts := map[string]bool{
+		".ico": true, ".png": true, ".jpg": true, ".jpeg": true, ".bmp": true,
+		".gif": true, ".svg": true, ".webp": true, ".exe": true, ".dll": true,
+		".pdf": true, ".zip": true, ".tar": true, ".gz": true, ".bin": true,
+		".so": true, ".dylib": true, ".class": true, ".obj": true, ".o": true,
+	}
+
+	err := filepath.Walk(fm.workspaceDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Skip directories and hidden files/folders
+		if info.IsDir() {
+			name := filepath.Base(path)
+			// Skip hidden dirs, node_modules, vendor etc. to speed up search
+			if name[0] == '.' || name == "node_modules" || name == "vendor" || name == ".git" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip hidden files
+		if filepath.Base(path)[0] == '.' {
+			return nil
+		}
+
+		// Skip excluded file types
+		ext := strings.ToLower(filepath.Ext(path))
+		if excludedExts[ext] {
+			return nil
+		}
+
+		// Skip large files (> 1MB)
+		if info.Size() > 1024*1024 {
+			return nil
+		}
+
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+
+		lowerContent := strings.ToLower(string(content))
+		relPath, err := filepath.Rel(fm.workspaceDir, path)
+		if err != nil {
+			return nil
+		}
+
+		// 1. Exact Match on any term
+		matchedExact := false
+		for _, term := range lowerTerms {
+			if strings.Contains(lowerContent, term) {
+				exactResults = append(exactResults, relPath)
+				matchedExact = true
+				break
+			}
+		}
+
+		if matchedExact {
+			return nil
+		}
+
+		// 2. Tokenized/Fuzzy match on any token set (fallback)
+		for _, tokens := range tokenSets {
+			allMatched := true
+			for _, token := range tokens {
+				if !strings.Contains(lowerContent, token) {
+					allMatched = false
+					break
+				}
+			}
+			if allMatched {
+				tokenResults = append(tokenResults, relPath)
+				break
+			}
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to search files: %w", err)
+	}
+
+	if len(exactResults) > 0 {
+		return exactResults, nil
+	}
+	return tokenResults, nil
+}
+
 // ListDirectories returns a list of subdirectories in the given directory
 func (fm *FileManager) ListDirectories(dirPath string) ([]string, error) {
 	entries, err := os.ReadDir(dirPath)

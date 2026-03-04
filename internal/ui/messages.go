@@ -12,3 +12,9 @@ type WindowSizeMsg = tea.WindowSizeMsg
 type AgenticFixResultMsg struct {
 	Result *agentic.FixResult
 }
+
+// SearchCompleteMsg is sent when a workspace search completes.
+type SearchCompleteMsg struct {
+	SearchTerm string
+	Results    []string
+}

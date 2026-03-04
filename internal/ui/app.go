@@ -545,6 +545,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		return a, nil
 
+	case SearchCompleteMsg:
+		a.aiPane.streaming = false
+		if len(msg.Results) > 0 {
+			// Open the first matching file
+			fullPath := filepath.Join(a.config.WorkspaceDir, msg.Results[0])
+			err := a.editorPane.LoadFile(fullPath)
+			if err != nil {
+				a.statusMessage = "Error opening found file: " + err.Error()
+				a.aiPane.DisplayNotification("Found matches for '" + msg.SearchTerm + "', but failed to open " + msg.Results[0])
+			} else {
+				a.statusMessage = "Opened: " + msg.Results[0]
+				a.aiPane.SetWorkingDir(filepath.Dir(a.editorPane.currentFile.Filepath))
+
+				// Switch to editor pane
+				a.activePane = types.EditorPaneType
+				a.editorPane.focused = true
+				a.aiPane.focused = false
+
+				var chatMsg strings.Builder
+				chatMsg.WriteString(fmt.Sprintf("🔍 Found '%s' in %d file(s):\n", msg.SearchTerm, len(msg.Results)))
+				for i, res := range msg.Results {
+					if i >= 5 {
+						chatMsg.WriteString(fmt.Sprintf("- ... and %d more\n", len(msg.Results)-5))
+						break
+					}
+					chatMsg.WriteString("- " + res + "\n")
+				}
+				chatMsg.WriteString("\nOpening the first match: " + msg.Results[0])
+				a.aiPane.DisplayNotification(chatMsg.String())
+			}
+		}
+		return a, nil
+
 	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg, ClearStatusMsg:
 		// Handle ClearStatusMsg
 		if _, ok := msg.(ClearStatusMsg); ok {
@@ -2136,6 +2169,53 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 	cleanMessage := message
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message)), "/preview") {
 		cleanMessage = strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(message), "/preview"))
+	}
+
+	// Check if this is a search request
+	isSearch := a.agenticFixer.IsSearchRequest(cleanMessage)
+	if isSearch {
+		a.aiPane.AddFixRequest(message, filePath)
+		a.aiPane.streaming = true
+
+		return func() tea.Msg {
+			// Extract search terms using AI
+			terms, err := a.agenticFixer.ExtractSearchTerms(cleanMessage)
+			if err != nil || len(terms) == 0 {
+				return AgenticFixResultMsg{
+					Result: &agentic.FixResult{
+						Success:          false,
+						ErrorMessage:     "Could not extract search terms.",
+						IsConversational: false,
+					},
+				}
+			}
+
+			results, err := a.fileManager.SearchFilesContent(terms)
+			if err != nil {
+				return AgenticFixResultMsg{
+					Result: &agentic.FixResult{
+						Success:          false,
+						ErrorMessage:     "Search failed: " + err.Error(),
+						IsConversational: false,
+					},
+				}
+			}
+
+			if len(results) == 0 {
+				return AgenticFixResultMsg{
+					Result: &agentic.FixResult{
+						Success:          false,
+						ErrorMessage:     "No files found containing variations of: " + terms[0],
+						IsConversational: false,
+					},
+				}
+			}
+
+			return SearchCompleteMsg{
+				SearchTerm: strings.Join(terms, ", "),
+				Results:    results,
+			}
+		}
 	}
 
 	isFixDetection := a.agenticFixer.IsFixRequest(cleanMessage)
