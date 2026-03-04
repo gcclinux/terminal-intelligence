@@ -683,6 +683,79 @@ func (a *AIChatPane) executeCommand(script string, cwd string) tea.Cmd {
 			}
 		}
 
+		// Preliminary Python venv initialization check
+		if strings.Contains(script, "pip install") || strings.Contains(script, "pip3 install") || strings.Contains(script, "python ") || strings.Contains(script, "python3 ") {
+			if effectiveDir != "" {
+				venvDir := filepath.Join(effectiveDir, "venv")
+				if _, err := os.Stat(venvDir); os.IsNotExist(err) {
+					// Determine python command
+					pythonCmd := ""
+					if runtime.GOOS == "windows" {
+						if _, err := exec.LookPath("python"); err == nil {
+							pythonCmd = "python"
+						} else if _, err := exec.LookPath("python3"); err == nil {
+							pythonCmd = "python3"
+						}
+					} else {
+						if _, err := exec.LookPath("python3"); err == nil {
+							pythonCmd = "python3"
+						} else if _, err := exec.LookPath("python"); err == nil {
+							pythonCmd = "python"
+						}
+					}
+
+					if pythonCmd != "" {
+						createCmd := exec.Command(pythonCmd, "-m", "venv", "venv")
+						createCmd.Dir = effectiveDir
+						createCmd.Run()
+					}
+				}
+
+				// Install requirements.txt if it exists
+				reqFile := filepath.Join(effectiveDir, "requirements.txt")
+				if _, err := os.Stat(reqFile); err == nil {
+					var pipCmd string
+					if runtime.GOOS == "windows" {
+						venvPip := filepath.Join(effectiveDir, "venv", "Scripts", "pip.exe")
+						if _, err := os.Stat(venvPip); err == nil {
+							pipCmd = venvPip
+						} else {
+							pipCmd = "pip"
+						}
+					} else {
+						venvPip := filepath.Join(effectiveDir, "venv", "bin", "pip")
+						if _, err := os.Stat(venvPip); err == nil {
+							pipCmd = venvPip
+						} else {
+							pipCmd = "pip3"
+						}
+					}
+					installCmd := exec.Command(pipCmd, "install", "-r", reqFile)
+					installCmd.Dir = effectiveDir
+					installCmd.Run()
+				}
+
+				// Rewrite the script to use venv python/pip if available
+				var venvPython, venvPip string
+				if runtime.GOOS == "windows" {
+					venvPython = filepath.Join(effectiveDir, "venv", "Scripts", "python.exe")
+					venvPip = filepath.Join(effectiveDir, "venv", "Scripts", "pip.exe")
+				} else {
+					venvPython = filepath.Join(effectiveDir, "venv", "bin", "python")
+					venvPip = filepath.Join(effectiveDir, "venv", "bin", "pip")
+				}
+
+				if _, err := os.Stat(venvPython); err == nil {
+					script = strings.ReplaceAll(script, "python3 ", venvPython+" ")
+					script = strings.ReplaceAll(script, "python ", venvPython+" ")
+				}
+				if _, err := os.Stat(venvPip); err == nil {
+					script = strings.ReplaceAll(script, "pip3 install", venvPip+" install")
+					script = strings.ReplaceAll(script, "pip install", venvPip+" install")
+				}
+			}
+		}
+
 		var cmd *exec.Cmd
 		if runtime.GOOS == "windows" {
 			// For Windows, convert newlines to semicolons for PowerShell

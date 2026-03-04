@@ -3,6 +3,7 @@ package executor
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -154,7 +155,19 @@ func (ce *CommandExecutor) GetInterpreter(scriptPath string) string {
 		// On Unix systems, use pwsh (PowerShell Core) if available
 		return "pwsh"
 	case ".py":
-		// Python script
+		// Python script - prefer venv Python if available
+		scriptDir := filepath.Dir(scriptPath)
+		if runtime.GOOS == "windows" {
+			venvPython := filepath.Join(scriptDir, "venv", "Scripts", "python.exe")
+			if _, err := os.Stat(venvPython); err == nil {
+				return venvPython
+			}
+			return "python"
+		}
+		venvPython := filepath.Join(scriptDir, "venv", "bin", "python")
+		if _, err := os.Stat(venvPython); err == nil {
+			return venvPython
+		}
 		return "python3"
 	case ".go":
 		// Go source file - use "go run" for execution

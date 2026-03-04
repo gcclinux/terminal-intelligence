@@ -472,3 +472,208 @@ func (li *LanguageInstaller) CheckLanguageForFile(fileType string) (bool, string
 		return true, ""
 	}
 }
+
+// GetPythonInstallCommand returns the appropriate command to install Python based on OS
+func (li *LanguageInstaller) GetPythonInstallCommand() (string, string, error) {
+	switch runtime.GOOS {
+	case "windows":
+		return "winget", "winget install -e --id Python.Python.3.12", nil
+	case "darwin":
+		return "brew", "brew install python@3.12", nil
+	case "linux":
+		// Try to detect package manager
+		if _, err := exec.LookPath("apt"); err == nil {
+			return "apt", "sudo apt update && sudo apt install -y python3 python3-venv python3-pip", nil
+		}
+		if _, err := exec.LookPath("dnf"); err == nil {
+			return "dnf", "sudo dnf install -y python3 python3-pip", nil
+		}
+		if _, err := exec.LookPath("pacman"); err == nil {
+			return "pacman", "sudo pacman -S --noconfirm python python-pip", nil
+		}
+		return "manual", "Download and install from https://www.python.org/downloads/", nil
+	default:
+		return "", "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+}
+
+// InstallPython attempts to install Python using the appropriate method for the OS
+func (li *LanguageInstaller) InstallPython() (string, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return li.InstallPythonLinux()
+	case "windows":
+		return li.InstallPythonWindows()
+	case "darwin":
+		return li.InstallPythonDarwin()
+	default:
+		return "", fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+	}
+}
+
+// InstallPythonWindows installs Python on Windows using winget
+func (li *LanguageInstaller) InstallPythonWindows() (string, error) {
+	var output strings.Builder
+	output.WriteString("Starting Python installation for Windows...\n\n")
+	li.reportProgress("🚀 Starting Python installation for Windows...")
+
+	// Check if winget is available
+	output.WriteString("1. Checking for winget...\n")
+	li.reportProgress("🔍 Checking for winget...")
+	checkCmd := exec.Command("winget", "--version")
+	if err := checkCmd.Run(); err != nil {
+		return output.String(), fmt.Errorf("winget is not installed or not in PATH")
+	}
+	output.WriteString("   winget is available\n\n")
+	li.reportProgress("✓ winget is available")
+
+	// Install Python
+	output.WriteString("2. Installing Python via winget...\n")
+	li.reportProgress("⬇️  Installing Python via winget... This may take a few minutes...")
+	cmd := exec.Command("powershell", "-NoProfile", "-Command", "winget install -e --id Python.Python.3.12")
+	cmdOutput, err := cmd.CombinedOutput()
+	output.WriteString(string(cmdOutput))
+
+	if err != nil {
+		return output.String(), fmt.Errorf("installation failed: %w", err)
+	}
+
+	output.WriteString("\n✓ Python installation complete!\n")
+	output.WriteString("\nIMPORTANT: Please restart Terminal Intelligence to update your PATH.\n")
+	li.reportProgress("🎉 Python installation complete!")
+	li.reportProgress("⚠️  IMPORTANT: Restart Terminal Intelligence to update PATH")
+
+	return output.String(), nil
+}
+
+// InstallPythonLinux installs Python on Linux using the system package manager
+func (li *LanguageInstaller) InstallPythonLinux() (string, error) {
+	var output strings.Builder
+	output.WriteString("Starting Python installation for Linux...\n\n")
+	li.reportProgress("🚀 Starting Python installation for Linux...")
+
+	// Detect package manager
+	output.WriteString("1. Detecting package manager...\n")
+	li.reportProgress("🔍 Detecting package manager...")
+
+	var installCmd *exec.Cmd
+	var pkgManager string
+
+	if _, err := exec.LookPath("apt"); err == nil {
+		pkgManager = "apt"
+		output.WriteString("   Detected: apt (Debian/Ubuntu)\n\n")
+		li.reportProgress("✓ Detected: apt (Debian/Ubuntu)")
+
+		// Update package list
+		output.WriteString("2. Updating package list...\n")
+		li.reportProgress("📡 Updating package list...")
+		updateCmd := exec.Command("sudo", "apt", "update")
+		if updateOutput, err := updateCmd.CombinedOutput(); err != nil {
+			output.WriteString(fmt.Sprintf("   Warning: apt update failed: %v\n", err))
+			output.WriteString(string(updateOutput))
+		} else {
+			output.WriteString("   Package list updated\n")
+			li.reportProgress("✓ Package list updated")
+		}
+		output.WriteString("\n")
+
+		output.WriteString("3. Installing Python...\n")
+		li.reportProgress("⬇️  Installing Python packages...")
+		installCmd = exec.Command("sudo", "apt", "install", "-y", "python3", "python3-venv", "python3-pip")
+	} else if _, err := exec.LookPath("dnf"); err == nil {
+		pkgManager = "dnf"
+		output.WriteString("   Detected: dnf (Fedora/RHEL)\n\n")
+		li.reportProgress("✓ Detected: dnf (Fedora/RHEL)")
+
+		output.WriteString("2. Installing Python...\n")
+		li.reportProgress("⬇️  Installing Python packages...")
+		installCmd = exec.Command("sudo", "dnf", "install", "-y", "python3", "python3-pip")
+	} else if _, err := exec.LookPath("pacman"); err == nil {
+		pkgManager = "pacman"
+		output.WriteString("   Detected: pacman (Arch Linux)\n\n")
+		li.reportProgress("✓ Detected: pacman (Arch Linux)")
+
+		output.WriteString("2. Installing Python...\n")
+		li.reportProgress("⬇️  Installing Python packages...")
+		installCmd = exec.Command("sudo", "pacman", "-S", "--noconfirm", "python", "python-pip")
+	} else {
+		return output.String(), fmt.Errorf("no supported package manager found (apt, dnf, or pacman). Please install Python manually from https://www.python.org/downloads/")
+	}
+
+	_ = pkgManager // used for logging above
+
+	cmdOutput, err := installCmd.CombinedOutput()
+	output.WriteString(string(cmdOutput))
+
+	if err != nil {
+		return output.String(), fmt.Errorf("installation failed: %w", err)
+	}
+
+	output.WriteString("\n")
+
+	// Verify installation
+	output.WriteString("4. Verifying installation...\n")
+	li.reportProgress("🔍 Verifying installation...")
+
+	verifyCmd := exec.Command("python3", "--version")
+	if verifyOutput, err := verifyCmd.Output(); err != nil {
+		output.WriteString(fmt.Sprintf("   Warning: Could not verify: %v\n", err))
+		li.reportProgress("⚠️  Warning: Could not verify installation")
+	} else {
+		versionOutput := strings.TrimSpace(string(verifyOutput))
+		output.WriteString(fmt.Sprintf("   %s\n", versionOutput))
+		li.reportProgress(fmt.Sprintf("✓ %s", versionOutput))
+	}
+	output.WriteString("\n")
+
+	output.WriteString("✓ Python installation complete!\n")
+	li.reportProgress("🎉 Python installation complete!")
+
+	return output.String(), nil
+}
+
+// InstallPythonDarwin installs Python on macOS using Homebrew
+func (li *LanguageInstaller) InstallPythonDarwin() (string, error) {
+	var output strings.Builder
+	output.WriteString("Starting Python installation for macOS...\n\n")
+	li.reportProgress("🚀 Starting Python installation for macOS...")
+
+	// Check if brew is available
+	output.WriteString("1. Checking for Homebrew...\n")
+	li.reportProgress("🔍 Checking for Homebrew...")
+	checkCmd := exec.Command("brew", "--version")
+	if err := checkCmd.Run(); err != nil {
+		return output.String(), fmt.Errorf("Homebrew is not installed. Install from: https://brew.sh")
+	}
+	output.WriteString("   Homebrew is available\n\n")
+	li.reportProgress("✓ Homebrew is available")
+
+	// Update brew
+	output.WriteString("2. Updating Homebrew...\n")
+	li.reportProgress("📡 Updating Homebrew...")
+	updateCmd := exec.Command("brew", "update")
+	if _, err := updateCmd.CombinedOutput(); err != nil {
+		output.WriteString(fmt.Sprintf("   Warning: brew update failed: %v\n", err))
+	} else {
+		output.WriteString("   Homebrew updated\n")
+		li.reportProgress("✓ Homebrew updated")
+	}
+	output.WriteString("\n")
+
+	// Install Python
+	output.WriteString("3. Installing Python via Homebrew...\n")
+	li.reportProgress("⬇️  Installing Python via Homebrew... This may take a few minutes...")
+	cmd := exec.Command("brew", "install", "python@3.12")
+	cmdOutput, err := cmd.CombinedOutput()
+	output.WriteString(string(cmdOutput))
+
+	if err != nil {
+		return output.String(), fmt.Errorf("installation failed: %w", err)
+	}
+
+	output.WriteString("\n✓ Python installation complete!\n")
+	output.WriteString("\nPython should now be available in your PATH.\n")
+	li.reportProgress("🎉 Python installation complete!")
+
+	return output.String(), nil
+}
