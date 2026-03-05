@@ -2055,6 +2055,18 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		}
 	}
 
+	// Handle /quit command
+	if trimmedMsg == "/quit" {
+		// Check for unsaved changes
+		if a.editorPane.HasUnsavedChanges() && !a.forceQuit {
+			a.showExitConfirmation = true
+			return nil
+		}
+		// Clear AI history on normal exit
+		a.aiPane.ClearHistory()
+		return tea.Quit
+	}
+
 	// Handle /help command
 	if trimmedMsg == "/help" {
 		helpText := "Keyboard Shortcuts\n"
@@ -2090,7 +2102,8 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  /preview  Preview changes before applying\n"
 		helpText += "  /model    Show current agent and model info\n"
 		helpText += "  /config   Edit configuration settings\n"
-		helpText += "  /help     Show this help message\n\n"
+		helpText += "  /help     Show this help message\n"
+		helpText += "  /quit     Quit the program\n\n"
 		helpText += "Fix Keywords\n"
 		helpText += "------------\n"
 		helpText += "  fix       Request code fix\n"

@@ -67,6 +67,7 @@ func (a *App) renderHelpDialog() string {
 	leftColumn += keyStyle.Render("  /model") + descStyle.Render("     Show current agent and model info") + "\n"
 	leftColumn += keyStyle.Render("  /config") + descStyle.Render("    Edit configuration settings") + "\n"
 	leftColumn += keyStyle.Render("  /help") + descStyle.Render("      Show this help message") + "\n"
+	leftColumn += keyStyle.Render("  /quit") + descStyle.Render("      Quit the program") + "\n"
 
 	// Right column - Editor shortcuts
 	var rightColumn string
