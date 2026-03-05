@@ -19,3 +19,17 @@ type SearchCompleteMsg struct {
 	ExactResults []string
 	AltResults   []string
 }
+
+// ProjectCompleteMsg is sent when a /project or /proceed operation finishes.
+// It carries the ChangeReport so the Update handler can open modified files.
+type ProjectCompleteMsg struct {
+	Report             *agentic.ChangeReport
+	Formatted          string
+	LastPreviewRequest string // non-empty when this was a preview run
+}
+
+// ProjectFileOpenMsg drives sequential file loading into the editor panel.
+// Each message opens Paths[0] and queues a new message for Paths[1:].
+type ProjectFileOpenMsg struct {
+	Paths []string // remaining absolute paths to open; open [0], queue rest
+}

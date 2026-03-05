@@ -61,13 +61,16 @@ func (a *App) renderHelpDialog() string {
 
 	// Agent Commands section
 	leftColumn += sectionStyle.Render("── Agent Commands ────────────────────────────") + "\n"
-	leftColumn += keyStyle.Render("  /fix") + descStyle.Render("       Force agentic mode (AI modifies code)") + "\n"
-	leftColumn += keyStyle.Render("  /ask") + descStyle.Render("       Force conversational mode (no changes)") + "\n"
-	leftColumn += keyStyle.Render("  /preview") + descStyle.Render("   Preview changes before applying") + "\n"
-	leftColumn += keyStyle.Render("  /model") + descStyle.Render("     Show current agent and model info") + "\n"
-	leftColumn += keyStyle.Render("  /config") + descStyle.Render("    Edit configuration settings") + "\n"
-	leftColumn += keyStyle.Render("  /help") + descStyle.Render("      Show this help message") + "\n"
-	leftColumn += keyStyle.Render("  /quit") + descStyle.Render("      Quit the program") + "\n"
+	leftColumn += keyStyle.Render("  /fix") + descStyle.Render("               Force agentic mode (AI modifies code)") + "\n"
+	leftColumn += keyStyle.Render("  /ask") + descStyle.Render("               Force conversational mode (no changes)") + "\n"
+	leftColumn += keyStyle.Render("  /preview") + descStyle.Render("           Preview changes before applying") + "\n"
+	leftColumn += keyStyle.Render("  /project <request>") + descStyle.Render(" Project-wide change across all files") + "\n"
+	leftColumn += keyStyle.Render("  /preview /project") + descStyle.Render("  Dry-run project-wide change (no writes)") + "\n"
+	leftColumn += keyStyle.Render("  /proceed") + descStyle.Render("           Apply changes from last dry-run") + "\n"
+	leftColumn += keyStyle.Render("  /model") + descStyle.Render("             Show current agent and model info") + "\n"
+	leftColumn += keyStyle.Render("  /config") + descStyle.Render("            Edit configuration settings") + "\n"
+	leftColumn += keyStyle.Render("  /help") + descStyle.Render("              Show this help message") + "\n"
+	leftColumn += keyStyle.Render("  /quit") + descStyle.Render("              Quit the program") + "\n"
 
 	// Right column - Editor shortcuts
 	var rightColumn string

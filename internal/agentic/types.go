@@ -154,3 +154,36 @@ func (fdr *FixDetectionResult) Validate() error {
 
 	return nil
 }
+
+// FileResult records the outcome of editing a single file.
+type FileResult struct {
+	Path         string
+	RelPath      string
+	LinesAdded   int
+	LinesRemoved int
+}
+
+// PatchFailure records a file whose patch could not be applied.
+type PatchFailure struct {
+	Path   string
+	Reason string
+}
+
+// ChangeReport summarises the outcome of a project-wide agentic operation.
+type ChangeReport struct {
+	FilesRead         []string
+	FilesModified     []FileResult
+	FilesUnreadable   []string
+	HallucinatedPaths []string
+	OutOfScopePaths   []string
+	PatchFailures     []PatchFailure
+	TruncationWarning string // set when >500 files were found
+	PreviewMode       bool
+}
+
+// ProjectFixRequest is the input to a project-wide fix operation.
+type ProjectFixRequest struct {
+	Message     string
+	ProjectRoot string
+	PreviewMode bool
+}

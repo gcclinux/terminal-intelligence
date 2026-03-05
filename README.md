@@ -132,6 +132,69 @@ The Git integration uses:
 
 For more technical details, see [internal/git/README.md](internal/git/README.md).
 
+## Agentic Project Assist
+
+The AI assistant can now operate across your **entire project** — not just the open file. Use `/project` to ask the AI to find, read, and modify multiple files at once based on a natural-language request.
+
+### How It Works
+
+When you send a `/project` command, the AI runs a three-phase pipeline:
+
+1. **Scanning** — recursively walks the workspace directory, collecting all text files (up to 500, skipping `.git`, `vendor`, `node_modules`, `.ti`, `build`)
+2. **Ranking** — sends the file list and your request to the AI model, which returns up to 20 files most likely to need changes
+3. **Modifying** — reads each relevant file (up to 2000 lines), generates `SEARCH/REPLACE` patches, validates them, and writes the changes to disk
+
+A change report is displayed when the operation completes, listing every file read, modified, or that encountered an error.
+
+### Commands
+
+```
+/project <request>          Run a project-wide change
+/preview /project <request> Dry-run: show what would change without writing files
+/proceed                    Apply the changes from the last dry-run
+```
+
+### Examples
+
+```
+/project add error handling to all HTTP client calls
+/project rename the Config struct to AppConfig everywhere
+/project improve the aichat pane height calculation
+/preview /project update all log.Printf calls to use structured logging
+```
+
+### Change Report
+
+After each operation you'll see a summary like:
+
+```
+Project-wide operation complete
+
+Files scanned: 42
+Files modified: 3
+  - internal/ui/aichat.go (+5 -2)
+  - internal/config/config.go (+1 -0)
+  - README.md (+3 -1)
+
+Patch failures: 1
+  - internal/executor/executor.go: search text not found in file content
+```
+
+If nothing was changed: `No files were modified.`
+
+### Safety
+
+- Only files inside the workspace root are ever read or written
+- Symlinks that resolve outside the workspace are rejected
+- Paths returned by the AI that don't exist on disk are discarded (logged as "hallucinated paths")
+- Preview mode (`/preview /project`) never writes anything to disk
+
+### Supported File Types
+
+The scanner considers: `.go`, `.md`, `.sh`, `.bash`, `.ps1`, `.py`, `.ts`, `.js`, `.json`, `.yaml`, `.yml`, `.toml`, `.txt`, `.html`, `.css`
+
+---
+
 ## Agentic Code Fixing
 
 The AI assistant can autonomously fix code issues in your open files. Simply describe what you want to change, and the AI will read your code, generate a fix, and apply it directly to the editor.

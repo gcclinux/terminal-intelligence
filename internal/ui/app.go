@@ -63,6 +63,7 @@ type App struct {
 	fileManager               *filemanager.FileManager  // File system operations
 	aiClient                  ai.AIClient               // AI service client (Ollama or Gemini)
 	agenticFixer              *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
+	projectFixer              *agentic.ProjectFixer     // Project-wide agentic fixer
 	activePane                types.PaneType            // Currently focused pane
 	width                     int                       // Terminal width
 	height                    int                       // Terminal height
@@ -93,6 +94,7 @@ type App struct {
 	searchResults             []string                  // Files found in last search
 	searchResultIndex         int                       // Current index in searchResults
 	searchTerms               []string                  // Last search terms used
+	lastPreviewRequest        string                    // Original /project request from the last preview run
 }
 
 // New creates a new application instance with the provided configuration.
@@ -157,6 +159,9 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	// Initialize AgenticCodeFixer
 	agenticFixer := agentic.NewAgenticCodeFixer(aiClient, config.DefaultModel)
 
+	// Initialize ProjectFixer
+	projectFixer := agentic.NewProjectFixer(aiClient, config.DefaultModel)
+
 	// Initialize GitClient and GitPane
 	gitClient := git.NewClient(config.WorkspaceDir)
 	gitPane := NewGitPane(gitClient, config.WorkspaceDir)
@@ -166,6 +171,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		fileManager:          fm,
 		aiClient:             aiClient,
 		agenticFixer:         agenticFixer,
+		projectFixer:         projectFixer,
 		editorPane:           NewEditorPane(fm),
 		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider, config.WorkspaceDir),
 		gitPane:              gitPane,
@@ -552,6 +558,59 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.gitPane.height = msg.Height
 
 		return a, nil
+
+	case ProjectCompleteMsg:
+		a.aiPane.streaming = false
+		// Store the bare request for /proceed if this was a preview run.
+		if msg.LastPreviewRequest != "" {
+			a.lastPreviewRequest = msg.LastPreviewRequest
+		}
+		a.aiPane.DisplayNotification(msg.Formatted)
+
+		// Open modified files sequentially into the editor panel.
+		// Preview-mode runs don't write files, so skip loading.
+		if msg.Report != nil && !msg.Report.PreviewMode && len(msg.Report.FilesModified) > 0 {
+			paths := make([]string, 0, len(msg.Report.FilesModified))
+			for _, f := range msg.Report.FilesModified {
+				if f.Path != "" {
+					paths = append(paths, f.Path)
+				}
+			}
+			if len(paths) > 0 {
+				// Load the first file immediately.
+				if err := a.editorPane.LoadFile(paths[0]); err == nil {
+					a.activePane = types.EditorPaneType
+					a.editorPane.focused = true
+					a.aiPane.focused = false
+				}
+				// Queue the rest.
+				if len(paths) > 1 {
+					cmds = append(cmds, func() tea.Msg {
+						return ProjectFileOpenMsg{Paths: paths[1:]}
+					})
+				}
+			}
+		}
+		return a, tea.Batch(cmds...)
+
+	case ProjectFileOpenMsg:
+		if len(msg.Paths) == 0 {
+			return a, nil
+		}
+		// Open the next file.
+		if err := a.editorPane.LoadFile(msg.Paths[0]); err == nil {
+			a.activePane = types.EditorPaneType
+			a.editorPane.focused = true
+			a.aiPane.focused = false
+		}
+		// Queue remaining files (last file stays open when list is exhausted).
+		if len(msg.Paths) > 1 {
+			remaining := msg.Paths[1:]
+			cmds = append(cmds, func() tea.Msg {
+				return ProjectFileOpenMsg{Paths: remaining}
+			})
+		}
+		return a, tea.Batch(cmds...)
 
 	case SearchCompleteMsg:
 		a.aiPane.streaming = false
@@ -2100,6 +2159,8 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  /fix      Force agentic mode (AI modifies code)\n"
 		helpText += "  /ask      Force conversational mode (no code changes)\n"
 		helpText += "  /preview  Preview changes before applying\n"
+		helpText += "  /project  Run a project-wide change across all files\n"
+		helpText += "  /proceed  Apply the last previewed /project change\n"
 		helpText += "  /model    Show current agent and model info\n"
 		helpText += "  /config   Edit configuration settings\n"
 		helpText += "  /help     Show this help message\n"
@@ -2118,6 +2179,71 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				Content: helpText,
 				Done:    true,
 			}
+		}
+	}
+
+	// Handle /project command (Req 9.2, 9.3, 1.4, 7.5)
+	// Check for /project prefix (with optional /preview prefix before it)
+	trimmedForProject := strings.TrimSpace(strings.ToLower(message))
+	isProjectCmd := strings.HasPrefix(trimmedForProject, "/project") ||
+		strings.HasPrefix(trimmedForProject, "/preview /project") ||
+		strings.HasPrefix(trimmedForProject, "/preview/project")
+
+	// Handle /proceed — re-run the last preview request without preview mode.
+	if trimmedForProject == "/proceed" {
+		if a.lastPreviewRequest == "" {
+			return func() tea.Msg {
+				return AINotificationMsg{Content: "Nothing to proceed with. Run /preview /project <request> first."}
+			}
+		}
+		// Re-issue as a real /project run using the stored request text.
+		message = "/project " + a.lastPreviewRequest
+		a.lastPreviewRequest = ""
+		isProjectCmd = true
+	}
+
+	if isProjectCmd {
+		// Req 9.3: Add user request to conversation history with filePath=projectRoot
+		a.aiPane.AddFixRequest(message, a.aiPane.workspaceRoot, "")
+		// Req 1.4: Show streaming indicator while operation is in progress
+		a.aiPane.streaming = true
+
+		projectRoot := a.aiPane.workspaceRoot
+		msgCopy := message
+
+		// Detect whether this is a preview run so we can store the request for /proceed.
+		isPreview := strings.HasPrefix(trimmedForProject, "/preview")
+
+		return func() tea.Msg {
+			// statusUpdate is intentionally nil here: calling DisplayNotification from a
+			// goroutine is not safe in Bubble Tea. The streaming indicator (set above)
+			// already satisfies Req 1.4 by showing the pane is busy.
+			report, err := a.projectFixer.ProcessProjectMessage(msgCopy, projectRoot, nil)
+			if err != nil {
+				return AINotificationMsg{Content: err.Error()}
+			}
+
+			formatted := agentic.FormatChangeReport(report)
+
+			var bareRequest string
+			// If this was a preview, remind the user they can /proceed.
+			if isPreview {
+				// Extract the bare request text (strip /preview /project prefixes).
+				bare := strings.TrimSpace(msgCopy)
+				lower := strings.ToLower(bare)
+				if strings.HasPrefix(lower, "/preview") {
+					bare = strings.TrimSpace(bare[len("/preview"):])
+					lower = strings.ToLower(bare)
+				}
+				if strings.HasPrefix(lower, "/project") {
+					bare = strings.TrimSpace(bare[len("/project"):])
+				}
+				bareRequest = bare
+				formatted += "\nType /proceed to apply these changes."
+			}
+
+			// Return ProjectCompleteMsg so the Update handler can open modified files.
+			return ProjectCompleteMsg{Report: report, Formatted: formatted, LastPreviewRequest: bareRequest}
 		}
 	}
 

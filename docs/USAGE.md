@@ -4,46 +4,21 @@
 
 ```bash
 # Run with config file (if ~/.ti/config.json exists)
-./ti
-
-# Override config with command-line flags
-./ti -workspace /path/to/workspace
-
-# Specify Ollama URL (overrides config)
-./ti -ollama http://localhost:11434
-
-# Specify model (overrides config)
-./ti -model llama2
-
-# Use Gemini instead of Ollama
-./ti -gemini YOUR_API_KEY -model gemini-2.0-flash-exp
+./ti-linux-amd64
 
 # Show version
-./ti -version
+./ti-linux-amd64 -version
 
-# Show help
-./ti -help
 
 ## Starting the Application
 
 ```bash
-./build/ti -model qwen2.5-coder:3b -ollama http://192.168.0.78:11434 -workspace ~/ti-workspace
-```
-
-```bash
-./build/ti -model qwen2.5-coder:1.5b -ollama http://localhost:11434 -workspace ~/ti-workspace
+./ti-linux-amd6
 ```
 
 ```powershell
-.\build\ti.exe -model qwen2.5-coder:3b -ollama http://localhost:11434 -workspace C:\Users\ricardo\Programming\test
+.\build\ti-windows-amd6.exe
 ``` 
-
-```bash
-./build/ti -model gemini-2.5-flash-lite -gemini api_key_goes_here -workspace ~/ti-workspace
-```
-```bash
-./build/ti -model gemini-3-flash-preview -gemini api_key_goes_here -workspace ~/ti-workspace
-```
 
 
 ## Key Features
@@ -81,6 +56,9 @@ The right pane is now split horizontally:
 - `/fix <request>` - Force agentic mode (AI will modify code)
 - `/ask <question>` - Force conversational mode (AI won't modify code)
 - `/preview <request>` - Preview changes before applying them
+- `/project <request>` - Run a project-wide change across all files in the workspace
+- `/preview /project <request>` - Dry-run a project-wide change without writing files
+- `/proceed` - Apply the changes from the last `/preview /project` dry-run
 - `/model` - Display current agent, model, and API key (for Gemini)
 - `/help` - Display keyboard shortcuts and agent commands
 
@@ -147,3 +125,5 @@ At the bottom of the screen, you'll see:
 - Unsaved files show a `*` in the title
 - AI responses show timestamps
 - Messages with code context are marked `[with context]`
+- `/project` works best with a focused, specific request — the AI picks up to 20 files to modify per run
+- Use `/preview /project` first on large or risky changes to see what would be affected before committing
