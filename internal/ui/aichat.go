@@ -1428,7 +1428,7 @@ func (a *AIChatPane) renderMessage(msg types.ChatMessage) []string {
 //   - Normal mode: Input area + response area with conversation history
 //
 // Normal mode layout:
-//   - Input area (top, 3 lines): Prompt with cursor
+//   - Input area (top, 12 lines): Prompt with cursor
 //   - Response area (bottom): Scrollable conversation history with scrollbar
 //
 // Scrollbar:
@@ -1453,7 +1453,7 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Calculate heights - input gets 2 lines (prompt + status), rest for responses
-	maxInputLines := 3
+	maxInputLines := 12
 	inputWidth := a.width - 15 // Account for border, padding, and "ai-assist> " prefix
 	if inputWidth < 10 {
 		inputWidth = 10
@@ -1476,8 +1476,8 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Ensure at least 1 line
-	if actualInputLines < 1 {
-		actualInputLines = 1
+	if actualInputLines < 3 {
+		actualInputLines = 3
 	}
 
 	// Build status line to show inside the input box
@@ -1500,6 +1500,11 @@ func (a *AIChatPane) View() string {
 	statusLine := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(statusColor)).
 		Render(statusText)
+
+	// Pad with empty lines if necessary so the status row goes to the bottom
+	for len(wrappedLines) < actualInputLines {
+		wrappedLines = append(wrappedLines, "")
+	}
 
 	// Add status as an extra line inside the input box
 	wrappedLines = append(wrappedLines, statusLine)
