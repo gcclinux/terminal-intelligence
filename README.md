@@ -20,7 +20,7 @@ Quick overview of current menu shotcuts and key combinations
 - **Code Editor**: Syntax-aware text editing with line numbers and file type detection
 - **AI Integration**: Context-aware AI assistance powered by Ollama, Gemini, or AWS Bedrock
 - **Agentic Code Fixing**: AI autonomously reads, analyzes, and fixes code directly in the editor
-- **Chat History Management**: Save and reload complete AI conversations with Ctrl+A and Ctrl+L
+- **Chat History Management**: Automatic session saving and reload with Ctrl+L
 - **Integrated Git Operations**: Full Git workflow support with visual panel interface
 - **File Management**: Create, open, save, and delete files
 - **Command Execution**: Run scripts and programs with Ctrl+R (auto-detects file type)

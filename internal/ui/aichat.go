@@ -87,6 +87,7 @@ type AIChatPane struct {
 	runningCmd        *exec.Cmd                  // Currently running command process (for kill support)
 	processKilled     bool                       // Whether the process was killed by user (Ctrl+K)
 	lastKeystrokeTime time.Time                  // Last keypress timestamp to detect rapid/terminal paste
+	sessionFile       string                     // File path for automated chat session saving
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -170,30 +171,7 @@ type LanguageInstallResultMsg struct {
 	Error   error
 }
 
-// NewAIChatPane creates a new AI chat pane.
-// Initializes an empty conversation with the specified AI client and model.
-// Defaults to "llama2" model if none is specified.
-//
-// Parameters:
-//   - client: AI service client (Ollama or Gemini)
-//   - model: AI model identifier
-//   - provider: Provider name ("ollama" or "gemini")
-//
-// Returns:
-//   - *AIChatPane: Initialized AI chat pane
-//
-// NewAIChatPane creates a new AI chat pane.
-// Initializes an empty conversation with the specified AI client and model.
-// Defaults to "llama2" model if none is specified.
-//
-// Parameters:
-//   - client: AI service client (Ollama or Gemini)
-//   - model: AI model identifier
-//   - provider: Provider name ("ollama" or "gemini")
-//   - workspaceRoot: Workspace root directory from AppConfig.WorkspaceDir
-//
-// Returns:
-//   - *AIChatPane: Initialized AI chat pane
+// - *AIChatPane: Initialized AI chat pane
 func NewAIChatPane(client ai.AIClient, model string, provider string, workspaceRoot string) *AIChatPane {
 	if model == "" {
 		model = "llama2"
@@ -218,6 +196,7 @@ func NewAIChatPane(client ai.AIClient, model string, provider string, workspaceR
 		workingDir:        cwd,
 		workspaceRoot:     workspaceRoot,
 		lastKeystrokeTime: time.Now(),
+		sessionFile:       "",
 	}
 }
 
@@ -349,10 +328,12 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 	userMsg := types.ChatMessage{
 		Role:            "user",
 		Content:         message,
+		ContextContent:  context,
 		Timestamp:       time.Now(),
 		ContextIncluded: context != "",
 	}
 	a.messages = append(a.messages, userMsg)
+	a.appendMessageToSessionLog(userMsg)
 
 	// Build prompt with context if provided
 	prompt := message
@@ -399,6 +380,7 @@ func (a *AIChatPane) DisplayResponse(response string) {
 		ContextIncluded: false,
 	}
 	a.messages = append(a.messages, assistantMsg)
+	a.appendMessageToSessionLog(assistantMsg)
 	a.streaming = false
 
 	// Extract code blocks from response
@@ -423,6 +405,7 @@ func (a *AIChatPane) DisplayNotification(notification string) {
 		IsNotification:  true,
 	}
 	a.messages = append(a.messages, notificationMsg)
+	a.appendMessageToSessionLog(notificationMsg)
 	a.streaming = false
 
 	// Auto-scroll to bottom
@@ -436,16 +419,19 @@ func (a *AIChatPane) DisplayNotification(notification string) {
 // Parameters:
 //   - message: User's fix request message
 //   - filePath: Path to the file being fixed
-func (a *AIChatPane) AddFixRequest(message string, filePath string) {
+//   - fileContent: Source text representing the context of the fix
+func (a *AIChatPane) AddFixRequest(message string, filePath string, fileContent string) {
 	fixRequestMsg := types.ChatMessage{
 		Role:            "user",
 		Content:         message,
+		ContextContent:  fileContent,
 		Timestamp:       time.Now(),
 		ContextIncluded: true,
 		IsFixRequest:    true,
 		FilePath:        filePath,
 	}
 	a.messages = append(a.messages, fixRequestMsg)
+	a.appendMessageToSessionLog(fixRequestMsg)
 
 	// Auto-scroll to bottom
 	a.scrollToBottom()
@@ -566,6 +552,93 @@ func (a *AIChatPane) ClearHistory() {
 	a.scrollOffset = 0
 	a.codeBlockInfos = []dirtracker.CodeBlockInfo{}
 	a.blockDirMappings = []string{}
+	a.sessionFile = ""
+}
+
+// ensureTiDirInGitignore ensures that .ti/ directory is added to .gitignore.
+// Creates .gitignore if it doesn't exist, or appends .ti/ if not already present.
+func (a *AIChatPane) ensureTiDirInGitignore() {
+	if a.workspaceRoot == "" {
+		return
+	}
+
+	gitignorePath := filepath.Join(a.workspaceRoot, ".gitignore")
+
+	// Read existing .gitignore if it exists
+	content, err := os.ReadFile(gitignorePath)
+	if err != nil && !os.IsNotExist(err) {
+		// Error reading file (but not "file doesn't exist")
+		return
+	}
+
+	contentStr := string(content)
+
+	// Check if .ti/ is already in .gitignore
+	lines := strings.Split(contentStr, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == ".ti/" || trimmed == ".ti" || trimmed == "/.ti/" {
+			// Already present, nothing to do
+			return
+		}
+	}
+
+	// Need to add .ti/ to .gitignore
+	var newContent string
+	if contentStr == "" {
+		// New .gitignore file
+		newContent = ".ti/\n"
+	} else {
+		// Append to existing .gitignore
+		// Ensure there's a newline before adding .ti/
+		if !strings.HasSuffix(contentStr, "\n") {
+			newContent = contentStr + "\n.ti/\n"
+		} else {
+			newContent = contentStr + ".ti/\n"
+		}
+	}
+
+	// Write updated .gitignore
+	os.WriteFile(gitignorePath, []byte(newContent), 0644)
+}
+
+// appendMessageToSessionLog appends a new message to the automated session log file.
+func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
+	if a.workspaceRoot == "" {
+		return
+	}
+
+	tiDir := filepath.Join(a.workspaceRoot, ".ti")
+	tiDirCreated := false
+	if _, err := os.Stat(tiDir); os.IsNotExist(err) {
+		os.MkdirAll(tiDir, 0755)
+		tiDirCreated = true
+	}
+
+	// If we just created .ti/ directory, ensure it's in .gitignore
+	if tiDirCreated {
+		a.ensureTiDirInGitignore()
+	}
+
+	if a.sessionFile == "" {
+		a.sessionFile = filepath.Join(tiDir, fmt.Sprintf("session_token_chat_%s.md", time.Now().Format("20060102_150405")))
+	}
+
+	f, err := os.OpenFile(a.sessionFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	var content strings.Builder
+	content.WriteString(msg.Role)
+	content.WriteString(" ")
+	content.WriteString(msg.Timestamp.Format("15:04:05"))
+	content.WriteString("\n")
+	content.WriteString(msg.Content)
+	content.WriteString("\n\n")
+
+	f.WriteString(content.String())
 }
 
 // GetHistory returns conversation history.
@@ -1480,8 +1553,23 @@ func (a *AIChatPane) View() string {
 		actualInputLines = 3
 	}
 
+	// Count words and estimate tokens (4 chars ≈ 1 token)
+	sessionWords := 0
+	sessionTokens := 0
+	for _, msg := range a.messages {
+		fullText := msg.Content
+		if msg.ContextContent != "" {
+			fullText += "\n" + msg.ContextContent
+		}
+		sessionWords += len(strings.Fields(fullText))
+		sessionTokens += len(fullText) / 4
+	}
+
+	wordsCount := sessionWords + len(strings.Fields(a.inputBuffer))
+	tokensCount := sessionTokens + len(a.inputBuffer)/4
+
 	// Build status line to show inside the input box
-	statusText := "⚡ " + a.provider + "/" + a.model
+	statusText := fmt.Sprintf("⚡ %s/%s", a.provider, a.model)
 	if !a.aiChecked {
 		statusText += "  … checking"
 	} else if a.aiAvailable {
@@ -1489,12 +1577,17 @@ func (a *AIChatPane) View() string {
 	} else {
 		statusText += "  ✗ No AI Accessible"
 	}
+
+	// Add stats
+	statsStr := fmt.Sprintf(" | (%d-%d) lines | %d words | ~%d tokens", actualInputLines, maxInputLines, wordsCount, tokensCount)
+	statusText += statsStr
+
 	statusColor := "15" // white
 	if a.aiChecked && !a.aiAvailable {
 		statusColor = "196" // red for unavailable
 	}
 	if a.streaming {
-		statusText = "⚡ " + a.provider + "/" + a.model + "  ⏳ generating..."
+		statusText = fmt.Sprintf("⚡ %s/%s  ⏳ generating...%s", a.provider, a.model, statsStr)
 		statusColor = "15"
 	}
 	statusLine := lipgloss.NewStyle().
@@ -1648,7 +1741,7 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Add instructions to title
-	title += " | Ctrl+Y: Code | Ctrl+A: Save | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New"
+	title += " | Ctrl+Y: Code | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New"
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).

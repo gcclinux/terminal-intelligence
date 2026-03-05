@@ -10,7 +10,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/ui"
 )
 
-var version = "0.0.2.3"
+var version = "0.0.2.4"
 var buildNumber = "dev"
 
 func main() {

@@ -2,6 +2,8 @@ package agentic
 
 import (
 	"fmt"
+	"go/scanner"
+	"go/token"
 	"log"
 	"regexp"
 	"strings"
@@ -622,16 +624,56 @@ func checkPythonIndentation(code string) error {
 	return nil
 }
 
-// validateGoSyntax performs basic Go syntax validation
+// validateGoSyntax performs basic Go syntax validation using go/scanner
 func validateGoSyntax(code string) error {
-	// Check for unmatched quotes
-	if err := checkUnmatchedQuotes(code); err != nil {
-		return fmt.Errorf("go syntax error: %w", err)
+	var s scanner.Scanner
+	fset := token.NewFileSet()
+	file := fset.AddFile("", fset.Base(), len(code))
+
+	// Use scanner to properly handle comments and strings
+	s.Init(file, []byte(code), nil, 0)
+
+	braces := 0
+	parens := 0
+	brackets := 0
+
+	for {
+		_, tok, _ := s.Scan()
+		if tok == token.EOF {
+			break
+		}
+		switch tok {
+		case token.LBRACE:
+			braces++
+		case token.RBRACE:
+			braces--
+		case token.LPAREN:
+			parens++
+		case token.RPAREN:
+			parens--
+		case token.LBRACK:
+			brackets++
+		case token.RBRACK:
+			brackets--
+		}
 	}
 
-	// Check for unmatched brackets/parentheses
-	if err := checkUnmatchedBrackets(code); err != nil {
-		return fmt.Errorf("go syntax error: %w", err)
+	if braces > 0 {
+		return fmt.Errorf("go syntax error: unmatched opening bracket: {")
+	} else if braces < 0 {
+		return fmt.Errorf("go syntax error: unmatched closing bracket: }")
+	}
+
+	if parens > 0 {
+		return fmt.Errorf("go syntax error: unmatched opening parenthesis: (")
+	} else if parens < 0 {
+		return fmt.Errorf("go syntax error: unmatched closing parenthesis: )")
+	}
+
+	if brackets > 0 {
+		return fmt.Errorf("go syntax error: unmatched opening bracket: [")
+	} else if brackets < 0 {
+		return fmt.Errorf("go syntax error: unmatched closing bracket: ]")
 	}
 
 	return nil

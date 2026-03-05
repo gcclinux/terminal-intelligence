@@ -1,16 +1,25 @@
 # Chat Save Feature
 
 ## Overview
-The Ctrl+A shortcut saves the entire AI chat history to a markdown file in the `.ti/` folder. The Ctrl+L shortcut allows you to reload previously saved chats back into the AI pane.
+Chat conversations are automatically saved to markdown files in the `.ti/` folder as you interact with the AI. The Ctrl+L shortcut allows you to reload previously saved chats back into the AI pane.
 
-## Save Chat (Ctrl+A)
+## Automatic Chat Saving
 
-### Usage
+### How It Works
 
-1. Have a conversation with the AI assistant
-2. Press `Ctrl+A` at any time during or after the conversation
-3. The entire chat history will be automatically saved to `.ti/chat-YYYY-MM-DD-HH-MM-SS-query.md`
-4. The saved file will automatically open in the editor
+1. When you start a conversation with the AI assistant, a new session file is automatically created
+2. Every message (both user and assistant) is immediately appended to the session file
+3. The session file is named `.ti/session_token_chat_YYYYMMDD_HHMMSS.md` based on when the session started
+4. All messages in the current session are saved to the same file
+5. When you clear chat history (Ctrl+T), a new session file will be created for the next conversation
+
+### Automatic .gitignore Management
+
+When the `.ti/` directory is created for the first time:
+- If `.gitignore` exists: `.ti/` is automatically appended to it
+- If `.gitignore` doesn't exist: A new `.gitignore` file is created with `.ti/` entry
+- The system checks for existing `.ti/`, `.ti`, or `/.ti/` entries to avoid duplicates
+- This ensures your chat sessions are never accidentally committed to version control
 
 ### File Format
 
@@ -32,12 +41,20 @@ Sure! I'll add network statistics to the program...
 
 ### Filename Convention
 
-The filename is generated automatically using:
-- Current date: `YYYY-MM-DD`
-- First user message timestamp: `HH-MM-SS`
-- First few words of the user's initial query (sanitized for filename compatibility)
+The filename is generated automatically when the first message is sent:
+- Format: `session_token_chat_YYYYMMDD_HHMMSS.md`
+- Date: `YYYYMMDD` (e.g., 20260305)
+- Time: `HHMMSS` (e.g., 143045)
 
-Example: `chat-2026-02-26-13-32-48-using-Go-language-create-a-program.md`
+Example: `session_token_chat_20260305_143045.md`
+
+### Benefits of Automatic Saving
+
+- No manual action required - conversations are preserved automatically
+- Real-time saving - messages are saved immediately as they're sent/received
+- No risk of losing conversation history
+- Eliminates the need for manual Ctrl+A save operations
+- Session-based organization - each conversation session gets its own file
 
 ## Load Chat (Ctrl+L)
 
@@ -70,17 +87,22 @@ All chat files are saved in the `.ti/` directory at the workspace root:
 ```
 <workspace-root>/
   .ti/
-    chat-2026-02-26-13-32-48-query1.md
-    chat-2026-02-26-14-15-30-query2.md
+    session_token_chat_20260305_143045.md
+    session_token_chat_20260305_151230.md
     20260219-160311_test.py  (existing backup files)
+  .gitignore  (automatically updated to include .ti/)
 ```
 
-## Benefits
+The `.ti/` directory is automatically added to `.gitignore` to prevent chat sessions from being committed to version control.
 
-- Complete conversation history preserved
+## Overall Benefits
+
+- Complete conversation history preserved automatically
+- Real-time saving - no data loss
 - Timestamped for easy reference
 - Searchable markdown format
 - Automatic organization in `.ti/` folder
-- No manual filename prompts
+- No manual save operations required
 - Easy to reload and continue conversations
-- Instantly viewable in the editor
+- Session-based file organization
+- Automatic `.gitignore` management - chat sessions never committed to Git

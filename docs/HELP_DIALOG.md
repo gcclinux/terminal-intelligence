@@ -25,7 +25,7 @@ You can also type `/help` in the AI chat prompt.
 │ ── AI ─────────────────────────────────────────────────────    │
 │   Ctrl+Y    List code blocks                                   │
 │   Ctrl+P    Insert selected code into editor                   │
-│   Ctrl+A    Insert full AI response into file                  │
+│   Ctrl+L    Load saved chat session                            │
 │   Ctrl+T    Clear chat / New chat                              │
 │                                                                │
 │ ── Navigation ─────────────────────────────────────────────    │

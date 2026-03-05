@@ -1,7 +1,7 @@
 # Chat Loader Implementation Summary
 
 ## Overview
-Implemented Ctrl+L functionality to load previously saved chat histories back into the AI pane, complementing the existing Ctrl+A save feature.
+Implemented Ctrl+L functionality to load previously saved chat histories back into the AI pane. Chat sessions are automatically saved in real-time, eliminating the need for manual save operations.
 
 ## Implementation Details
 
@@ -58,8 +58,10 @@ content
 
 Updated the AI pane title bar to show:
 ```
-AI Responses (02) [Gemini] | Ctrl+Y: Code | Ctrl+A: Save | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New
+AI Responses (02) [Gemini] | Ctrl+Y: Code | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New
 ```
+
+Note: Chat sessions are now automatically saved in real-time, so manual save is no longer needed.
 
 ### 7. Help System Updates
 
@@ -70,11 +72,11 @@ Updated help text in:
 
 ## User Workflow
 
-### Saving a Chat
-1. User has conversation with AI
-2. Presses `Ctrl+A`
-3. Chat saved to `.ti/chat-YYYY-MM-DD-HH-MM-SS-query.md`
-4. File opens in editor
+### Automatic Chat Saving
+1. User starts conversation with AI
+2. First message automatically creates a session file: `.ti/session_token_chat_YYYYMMDD_HHMMSS.md`
+3. All subsequent messages are automatically appended to the same file
+4. No manual action required - everything is saved in real-time
 
 ### Loading a Chat
 1. User presses `Ctrl+L` (works anytime, especially after `Ctrl+T` clear)

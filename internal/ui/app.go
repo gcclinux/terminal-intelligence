@@ -211,7 +211,6 @@ func (a *App) Init() tea.Cmd {
 //   - Ctrl+N: New file prompt
 //   - Ctrl+T: Clear AI chat history
 //   - Ctrl+H: Toggle help
-//   - Ctrl+A: Save full chat history to .ti/ folder
 //   - Tab: Switch between editor and AI panes
 //   - Ctrl+S: Save file
 //   - Ctrl+X: Close file
@@ -1122,96 +1121,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmd := a.gitPane.Toggle()
 			return a, cmd
 
-		case "ctrl+a":
-			// Save entire AI chat history to .ti/ folder
-			history := a.aiPane.GetHistory()
-			if len(history) == 0 {
-				a.statusMessage = "No chat history to save"
-				return a, nil
-			}
-
-			// Find the first user message timestamp for filename
-			var firstUserTime time.Time
-			var firstUserQuery string
-			for _, msg := range history {
-				if msg.Role == "user" && !msg.IsNotification && !msg.IsFixRequest {
-					firstUserTime = msg.Timestamp
-					// Extract first few words for filename (max 50 chars)
-					firstUserQuery = msg.Content
-					if len(firstUserQuery) > 50 {
-						firstUserQuery = firstUserQuery[:50]
-					}
-					// Clean up for filename - remove special chars
-					firstUserQuery = strings.Map(func(r rune) rune {
-						if r == ' ' {
-							return '-'
-						}
-						if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' {
-							return r
-						}
-						return -1
-					}, firstUserQuery)
-					break
-				}
-			}
-
-			// Use current time if no user message found
-			if firstUserTime.IsZero() {
-				firstUserTime = time.Now()
-				firstUserQuery = "chat"
-			}
-
-			// Create .ti directory if it doesn't exist
-			tiDir := filepath.Join(a.config.WorkspaceDir, ".ti")
-			err := os.MkdirAll(tiDir, 0755)
-			if err != nil {
-				a.statusMessage = "Error creating .ti directory: " + err.Error()
-				return a, nil
-			}
-
-			// Format filename: chat-YYYY-MM-DD-HH-MM-SS-query.md
-			filename := fmt.Sprintf("chat-%s-%s.md",
-				firstUserTime.Format("2006-01-02-15-04-05"),
-				firstUserQuery)
-			filepath := filepath.Join(tiDir, filename)
-
-			// Build chat content
-			var chatContent strings.Builder
-			for _, msg := range history {
-				// Skip notifications and fix requests
-				if msg.IsNotification || msg.IsFixRequest {
-					continue
-				}
-
-				// Format: role timestamp\ncontent\n\n
-				chatContent.WriteString(msg.Role)
-				chatContent.WriteString(" ")
-				chatContent.WriteString(msg.Timestamp.Format("15:04:05"))
-				chatContent.WriteString("\n")
-				chatContent.WriteString(msg.Content)
-				chatContent.WriteString("\n\n")
-			}
-
-			// Save to file
-			err = os.WriteFile(filepath, []byte(chatContent.String()), 0644)
-			if err != nil {
-				a.statusMessage = "Error saving chat: " + err.Error()
-				return a, nil
-			}
-
-			// Open the saved file in editor
-			err = a.editorPane.LoadFile(filepath)
-			if err != nil {
-				a.statusMessage = "Chat saved to " + filename + " but failed to open: " + err.Error()
-			} else {
-				a.statusMessage = "Chat saved to " + filename
-				// Switch to editor pane to show the result
-				a.activePane = types.EditorPaneType
-				a.editorPane.focused = true
-				a.aiPane.focused = false
-			}
-			return a, nil
-
 		case "ctrl+l":
 			// Open chat loader to reload saved chats
 			tiDir := filepath.Join(a.config.WorkspaceDir, ".ti")
@@ -1231,7 +1140,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 			var chatFiles []string
 			for _, entry := range entries {
-				if !entry.IsDir() && strings.HasPrefix(entry.Name(), "chat-") && strings.HasSuffix(entry.Name(), ".md") {
+				if !entry.IsDir() && strings.HasPrefix(entry.Name(), "session_token_chat_") && strings.HasSuffix(entry.Name(), ".md") {
 					chatFiles = append(chatFiles, entry.Name())
 				}
 			}
@@ -2165,7 +2074,6 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "--\n"
 		helpText += "  Ctrl+Y    List code blocks (Execute/Insert/Return)\n"
 		helpText += "  Ctrl+P    Insert selected code into editor\n"
-		helpText += "  Ctrl+A    Save full chat history to .ti/ folder\n"
 		helpText += "  Ctrl+L    Load saved chat from .ti/ folder\n"
 		helpText += "  Ctrl+T    Clear chat / New chat\n\n"
 		helpText += "Navigation\n"
@@ -2220,7 +2128,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 	// Check if this is a search request
 	isSearch := a.agenticFixer.IsSearchRequest(cleanMessage)
 	if isSearch {
-		a.aiPane.AddFixRequest(message, filePath)
+		a.aiPane.AddFixRequest(message, filePath, "")
 		a.aiPane.streaming = true
 
 		return func() tea.Msg {
@@ -2274,7 +2182,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 
 	// Step 4: Handle fix request
 	// Display the message immediately as a fix request
-	a.aiPane.AddFixRequest(message, filePath)
+	a.aiPane.AddFixRequest(message, filePath, fileContent)
 
 	// Set AI pane to thinking state (streaming)
 	a.aiPane.streaming = true

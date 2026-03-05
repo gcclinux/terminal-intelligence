@@ -16,7 +16,7 @@ func TestAddFixRequest(t *testing.T) {
 	// Add a fix request
 	message := "fix the bug in line 10"
 	filePath := "/path/to/file.sh"
-	aiPane.AddFixRequest(message, filePath)
+	aiPane.AddFixRequest(message, filePath, "echo 'hello world'")
 
 	// Verify the fix request was added to history
 	history := aiPane.GetHistory()
@@ -50,7 +50,7 @@ func TestFixRequestAndNotificationInHistory(t *testing.T) {
 	// Add a fix request
 	fixMessage := "update the function"
 	filePath := "/path/to/script.sh"
-	aiPane.AddFixRequest(fixMessage, filePath)
+	aiPane.AddFixRequest(fixMessage, filePath, "current script content")
 
 	// Add a notification (simulating the fix result)
 	notification := "✓ Applied fix to /path/to/script.sh\nModified 3 lines near line 15\nRemember to save the file and test your changes."

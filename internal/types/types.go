@@ -61,6 +61,7 @@ type FileMetadata struct {
 type ChatMessage struct {
 	Role            string // "user" or "assistant"
 	Content         string
+	ContextContent  string // Additional hidden context sent to the AI (e.g., file contents)
 	Timestamp       time.Time
 	ContextIncluded bool
 	IsNotification  bool   // True if this is a change notification
