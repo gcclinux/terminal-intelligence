@@ -10,7 +10,9 @@ Quick overview of current menu shotcuts and key combinations
 ![TI Help Menu](images/menu-guide.png)
 ---
 
-# [**Additional Screenshot Showcase →**](SHOWCASE.md)
+## 🖼️ [**Additional Screenshot Showcase →**](SHOWCASE.md)
+
+## 📖 [**User Tutorial Manual**](docs\TUTORIAL_MANUAL.md)
 
 ## Features
 
