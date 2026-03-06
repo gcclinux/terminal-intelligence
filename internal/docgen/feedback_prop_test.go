@@ -16,6 +16,11 @@ func (m *MockChatPane) DisplayNotification(notification string) {
 	m.notifications = append(m.notifications, notification)
 }
 
+func (m *MockChatPane) OpenFileInEditor(filePath string) error {
+	// Mock implementation - just return nil
+	return nil
+}
+
 func (m *MockChatPane) GetNotifications() []string {
 	return m.notifications
 }

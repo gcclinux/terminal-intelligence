@@ -67,6 +67,8 @@ func (a *App) renderHelpDialog() string {
 	leftColumn += keyStyle.Render("  /project <request>") + descStyle.Render(" Project-wide change across all files") + "\n"
 	leftColumn += keyStyle.Render("  /preview /project") + descStyle.Render("  Dry-run project-wide change (no writes)") + "\n"
 	leftColumn += keyStyle.Render("  /proceed") + descStyle.Render("           Apply changes from last dry-run") + "\n"
+	leftColumn += "\n"
+	leftColumn += sectionStyle.Render("── Other Commands ────────────────────────────") + "\n"
 	leftColumn += keyStyle.Render("  /model") + descStyle.Render("             Show current agent and model info") + "\n"
 	leftColumn += keyStyle.Render("  /config") + descStyle.Render("            Edit configuration settings") + "\n"
 	leftColumn += keyStyle.Render("  /help") + descStyle.Render("              Show this help message") + "\n"
@@ -112,6 +114,16 @@ func (a *App) renderHelpDialog() string {
 	rightColumn += keyStyle.Render("  ↑↓") + descStyle.Render("            Navigate options") + "\n"
 	rightColumn += keyStyle.Render("  Enter") + descStyle.Render("         Select operation") + "\n"
 	rightColumn += keyStyle.Render("  Esc") + descStyle.Render("           Close Git Panel") + "\n"
+	rightColumn += "\n"
+
+	//Documentation section
+	rightColumn += sectionStyle.Render("── Documentation Generation ──────────────────") + "\n"
+	rightColumn += keyStyle.Render("  /project /doc") + descStyle.Render("      Generate project documentation") + "\n"
+	rightColumn += descStyle.Render("  ~ Examples ~") + "\n"
+	rightColumn += descStyle.Render("    - /project /doc create user manual") + "\n"
+	rightColumn += descStyle.Render("    - /project /doc create API reference") + "\n"
+	rightColumn += descStyle.Render("    - /project /doc create installation guide") + "\n"
+	rightColumn += descStyle.Render("    - /project /doc for module internal") + "\n"
 
 	// Style both columns
 	columnStyle := lipgloss.NewStyle().

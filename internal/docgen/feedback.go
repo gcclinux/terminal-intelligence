@@ -14,6 +14,7 @@ type FeedbackManager struct {
 // This allows for testing without requiring a full AIChatPane instance
 type ChatPaneInterface interface {
 	DisplayNotification(notification string)
+	OpenFileInEditor(filePath string) error
 }
 
 // NewFeedbackManager creates a new FeedbackManager with the given chat pane
@@ -105,6 +106,26 @@ func (f *FeedbackManager) NotifyFileConflict(conflicts []*WriteResult) {
 
 	message.WriteString("\nUse overwrite option to replace existing files.")
 	f.chatPane.DisplayNotification(message.String())
+}
+
+// NotifyFileCreated displays a message about a file being created and opens it in the editor
+func (f *FeedbackManager) NotifyFileCreated(result *WriteResult) {
+	if f.chatPane == nil {
+		return
+	}
+
+	status := "created"
+	if result.Existed {
+		status = "updated"
+	}
+
+	message := fmt.Sprintf("📄 Document %s: %s", status, result.Filename)
+	f.chatPane.DisplayNotification(message)
+
+	// Open the file in the editor
+	if err := f.chatPane.OpenFileInEditor(result.Path); err != nil {
+		f.chatPane.DisplayNotification(fmt.Sprintf("⚠️  Could not open file in editor: %v", err))
+	}
 }
 
 // documentationTypeName returns a human-readable name for a documentation type

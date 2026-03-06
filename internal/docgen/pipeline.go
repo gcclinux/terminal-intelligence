@@ -59,30 +59,22 @@ func (p *Pipeline) generateDocumentation(parsed *ParsedCommand) error {
 	// Notify start
 	p.feedback.NotifyStart(classification.Types)
 
-	// Analyze project
-	p.feedback.NotifyProgress("Analyzing project", "")
-	p.analyzer = NewProjectAnalyzer(p.workspaceRoot, parsed.ScopeFilters)
-	analysisResult, err := p.analyzer.Analyze()
-	if err != nil {
-		p.feedback.NotifyError(fmt.Errorf("analysis failed: %w", err))
-		return err
+	// Step 1: Create empty document files first
+	var filesToGenerate []*GeneratedDoc
+	for _, docType := range classification.Types {
+		doc := &GeneratedDoc{
+			Type:     docType,
+			Content:  "", // Empty initially
+			Filename: docType.Filename(),
+		}
+		filesToGenerate = append(filesToGenerate, doc)
 	}
 
-	// Generate documentation
-	p.feedback.NotifyProgress("Generating documentation", "")
-	p.generator = NewDocumentationGenerator(analysisResult)
-	docs, err := p.generator.GenerateMultiple(classification.Types)
-	if err != nil {
-		p.feedback.NotifyError(fmt.Errorf("generation failed: %w", err))
-		return err
-	}
-
-	// Write files
-	p.feedback.NotifyProgress("Writing files", "")
+	// Step 2: Create files and open the first one in editor
 	var results []*WriteResult
-	var conflicts []*WriteResult
+	var firstFile *WriteResult
 
-	for _, doc := range docs {
+	for i, doc := range filesToGenerate {
 		// Check for conflicts first
 		if p.writer.CheckExists(doc.Filename) {
 			conflict := &WriteResult{
@@ -91,28 +83,79 @@ func (p *Pipeline) generateDocumentation(parsed *ParsedCommand) error {
 				Existed:  true,
 				Written:  false,
 			}
-			conflicts = append(conflicts, conflict)
+			p.feedback.NotifyFileConflict([]*WriteResult{conflict})
 			continue
 		}
 
-		// Write the file
-		result, err := p.writer.Write(doc, false)
+		// Create empty file
+		emptyDoc := &GeneratedDoc{
+			Type:     doc.Type,
+			Content:  "# " + documentationTypeName(doc.Type) + "\n\nGenerating...",
+			Filename: doc.Filename,
+		}
+
+		result, err := p.writer.Write(emptyDoc, false)
 		if err != nil {
-			// Log error but continue with other files
+			p.feedback.NotifyProgress("Warning", fmt.Sprintf("Failed to create %s: %v", doc.Filename, err))
+			continue
+		}
+
+		results = append(results, result)
+
+		// Step 3: Open first file in editor and notify
+		if i == 0 {
+			firstFile = result
+			p.feedback.NotifyFileCreated(result)
+		}
+	}
+
+	if len(results) == 0 {
+		// All files had conflicts - this is not an error, just nothing to do
+		return nil
+	}
+
+	// Step 4: Analyze project
+	p.feedback.NotifyProgress("Analyzing project", "")
+	p.analyzer = NewProjectAnalyzer(p.workspaceRoot, parsed.ScopeFilters)
+	analysisResult, err := p.analyzer.Analyze()
+	if err != nil {
+		p.feedback.NotifyError(fmt.Errorf("analysis failed: %w", err))
+		return err
+	}
+
+	// Step 5: Generate documentation
+	p.feedback.NotifyProgress("Generating documentation", "")
+	p.generator = NewDocumentationGenerator(analysisResult)
+	docs, err := p.generator.GenerateMultiple(classification.Types)
+	if err != nil {
+		p.feedback.NotifyError(fmt.Errorf("generation failed: %w", err))
+		return err
+	}
+
+	// Step 6: Update files with generated content
+	p.feedback.NotifyProgress("Writing documentation", "")
+	var finalResults []*WriteResult
+
+	for _, doc := range docs {
+		// Write the actual content (overwrite the placeholder)
+		result, err := p.writer.Write(doc, true)
+		if err != nil {
 			p.feedback.NotifyProgress("Warning", fmt.Sprintf("Failed to write %s: %v", doc.Filename, err))
 			continue
 		}
-		results = append(results, result)
+		finalResults = append(finalResults, result)
 	}
 
-	// Report conflicts if any
-	if len(conflicts) > 0 {
-		p.feedback.NotifyFileConflict(conflicts)
+	// Step 7: Reload the first file in editor to show updated content
+	if firstFile != nil {
+		if err := p.feedback.chatPane.OpenFileInEditor(firstFile.Path); err != nil {
+			p.feedback.NotifyProgress("Warning", fmt.Sprintf("Could not reload file in editor: %v", err))
+		}
 	}
 
-	// Notify completion
-	if len(results) > 0 {
-		p.feedback.NotifyComplete(results, parsed.ScopeFilters)
+	// Step 8: Notify completion
+	if len(finalResults) > 0 {
+		p.feedback.NotifyComplete(finalResults, parsed.ScopeFilters)
 	}
 
 	return nil

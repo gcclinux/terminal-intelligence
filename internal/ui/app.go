@@ -460,6 +460,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case OpenFileInEditorMsg:
+		// Handle file opening from documentation generation
+		err := a.editorPane.LoadFile(msg.FilePath)
+		if err != nil {
+			a.statusMessage = "Error opening file: " + err.Error()
+		} else {
+			a.statusMessage = "Opened: " + msg.FilePath
+			// Switch to editor pane to show the file
+			a.activePane = types.EditorPaneType
+			a.editorPane.focused = true
+			a.aiPane.focused = false
+		}
+		return a, nil
+
 	case AgenticFixResultMsg:
 		a.aiPane.streaming = false
 		result := msg.Result
@@ -2158,6 +2172,12 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "--------------\n"
 		helpText += "  /fix      Force agentic mode (AI modifies code)\n"
 		helpText += "  /ask      Force conversational mode (no code changes)\n"
+		helpText += "  /doc      Generate project documentation\n"
+		helpText += "            Examples:\n"
+		helpText += "            -  /project /doc create user manual\n"
+		helpText += "            -  /project /doc create API reference\n"
+		helpText += "            -  /project /doc create installation guide\n"
+		helpText += "            -  /project /doc for module internal\n\n"
 		helpText += "  /preview  Preview changes before applying\n"
 		helpText += "  /project  Run a project-wide change across all files\n"
 		helpText += "  /proceed  Apply the last previewed /project change\n"
@@ -2184,10 +2204,12 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 
 	// Handle /project command (Req 9.2, 9.3, 1.4, 7.5)
 	// Check for /project prefix (with optional /preview prefix before it)
+	// BUT: Skip if this is a documentation generation command (/project /doc)
 	trimmedForProject := strings.TrimSpace(strings.ToLower(message))
-	isProjectCmd := strings.HasPrefix(trimmedForProject, "/project") ||
+	isDocGenCmd := strings.Contains(trimmedForProject, "/doc")
+	isProjectCmd := !isDocGenCmd && (strings.HasPrefix(trimmedForProject, "/project") ||
 		strings.HasPrefix(trimmedForProject, "/preview /project") ||
-		strings.HasPrefix(trimmedForProject, "/preview/project")
+		strings.HasPrefix(trimmedForProject, "/preview/project"))
 
 	// Handle /proceed — re-run the last preview request without preview mode.
 	if trimmedForProject == "/proceed" {

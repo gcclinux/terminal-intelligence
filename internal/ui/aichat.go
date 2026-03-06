@@ -89,6 +89,7 @@ type AIChatPane struct {
 	processKilled     bool                       // Whether the process was killed by user (Ctrl+K)
 	lastKeystrokeTime time.Time                  // Last keypress timestamp to detect rapid/terminal paste
 	sessionFile       string                     // File path for automated chat session saving
+	fileToOpen        string                     // File path to open in editor after doc generation
 }
 
 // AIResponseMsg is sent when AI response chunk is received.
@@ -170,6 +171,12 @@ type LanguageInstallResultMsg struct {
 	Success bool
 	Output  string
 	Error   error
+}
+
+// OpenFileInEditorMsg is sent when a file should be opened in the editor.
+// Used by documentation generation to open generated files.
+type OpenFileInEditorMsg struct {
+	FilePath string // Path to the file to open
 }
 
 // - *AIChatPane: Initialized AI chat pane
@@ -334,6 +341,14 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 		if err != nil {
 			a.DisplayNotification(fmt.Sprintf("Documentation generation error: %v", err))
 		}
+		// Check if a file needs to be opened
+		if a.fileToOpen != "" {
+			filePath := a.fileToOpen
+			a.fileToOpen = "" // Clear for next time
+			return func() tea.Msg {
+				return OpenFileInEditorMsg{FilePath: filePath}
+			}
+		}
 		// Return empty command since pipeline handles all feedback
 		return nil
 	}
@@ -424,6 +439,21 @@ func (a *AIChatPane) DisplayNotification(notification string) {
 
 	// Auto-scroll to bottom
 	a.scrollToBottom()
+}
+
+// OpenFileInEditor stores the file path to be opened in the editor.
+// Used by documentation generation to automatically open generated files.
+// The actual file opening happens in SendMessage after the pipeline completes.
+//
+// Parameters:
+//   - filePath: Path to the file to open
+//
+// Returns:
+//   - error: Always returns nil (errors are handled by the app)
+func (a *AIChatPane) OpenFileInEditor(filePath string) error {
+	// Store the file path to be opened after pipeline completes
+	a.fileToOpen = filePath
+	return nil
 }
 
 // AddFixRequest adds a fix request to conversation history as a user message.

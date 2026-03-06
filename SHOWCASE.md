@@ -7,24 +7,24 @@ This document showcases the various features and views of Terminal Intelligence 
 ### Git Operations
 Terminal Intelligence provides integrated Git operations through an intuitive panel interface.
 
+### Create documentation
+TI provides a simple way to create documention ofr your whole project, this is an example
+
+![Documentation](images/create-docs.png)
+
+---
+
 #### Git Status
 View the current status of your repository, including modified, staged, and untracked files.
 
 ![Git Status](images/git-status.png)
 
----
-
-#### Git Stage
-Stage files for commit with a single button press.
-
-![Git Stage](images/git-stage.png)
 
 ---
 
-#### Git Commit
-Commit your staged changes with a custom message.
-
-![Git Commit](images/git-commit.png)
+| Git Commit | Git Stage |
+| ---------- | --------- |
+| ![Git Commit](images/git-commit.png) | ![Git Stage](images/git-stage.png) |
 
 ---
 
