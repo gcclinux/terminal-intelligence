@@ -1623,7 +1623,7 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Add stats
-	statsStr := fmt.Sprintf(" | (%d-%d) lines | %d words | ~%d tokens", actualInputLines, maxInputLines, wordsCount, tokensCount)
+	statsStr := fmt.Sprintf(" | %d words | ~%d tokens", wordsCount, tokensCount)
 	statusText += statsStr
 
 	statusColor := "15" // white
