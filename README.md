@@ -12,7 +12,7 @@ Quick overview of current menu shotcuts and key combinations
 
 ## 🖼️ [**Additional Screenshot Showcase →**](SHOWCASE.md)
 
-## 📖 [**User Tutorial Manual**](docs\TUTORIAL_MANUAL.md)
+## 📖 [**User Tutorial Manual**](docs/TUTORIAL_MANUAL.md)
 
 ## Features
 
