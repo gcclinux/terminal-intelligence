@@ -17,6 +17,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/user/terminal-intelligence/internal/ai"
 	"github.com/user/terminal-intelligence/internal/dirtracker"
+	"github.com/user/terminal-intelligence/internal/docgen"
 	"github.com/user/terminal-intelligence/internal/types"
 )
 
@@ -324,6 +325,19 @@ func (a *AIChatPane) GetActiveArea() int {
 // Returns:
 //   - tea.Cmd: Command that streams AI response
 func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
+	// Check if this is a documentation generation command
+	pipeline := docgen.NewPipeline(a.workspaceRoot, a.aiClient, a.model, a)
+	isDocCommand, err := pipeline.ProcessCommand(message)
+
+	if isDocCommand {
+		// Documentation command was processed
+		if err != nil {
+			a.DisplayNotification(fmt.Sprintf("Documentation generation error: %v", err))
+		}
+		// Return empty command since pipeline handles all feedback
+		return nil
+	}
+
 	// Add user message to history
 	userMsg := types.ChatMessage{
 		Role:            "user",
