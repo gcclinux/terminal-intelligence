@@ -4,3 +4,4 @@ build/*
 .ti/
 .antigravity/
 .kiro/
+*.exe
