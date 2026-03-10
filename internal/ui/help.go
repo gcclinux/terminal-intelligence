@@ -118,12 +118,12 @@ func (a *App) renderHelpDialog() string {
 
 	//Documentation section
 	rightColumn += sectionStyle.Render("── Documentation Generation ──────────────────") + "\n"
-	rightColumn += keyStyle.Render("  /project /doc") + descStyle.Render("      Generate project documentation") + "\n"
+	rightColumn += keyStyle.Render("  /doc") + descStyle.Render("              Generate project documentation") + "\n"
 	rightColumn += descStyle.Render("  ~ Examples ~") + "\n"
-	rightColumn += descStyle.Render("    - /project /doc create user manual") + "\n"
-	rightColumn += descStyle.Render("    - /project /doc create API reference") + "\n"
-	rightColumn += descStyle.Render("    - /project /doc create installation guide") + "\n"
-	rightColumn += descStyle.Render("    - /project /doc for module internal") + "\n"
+	rightColumn += descStyle.Render("    - /doc create user manual") + "\n"
+	rightColumn += descStyle.Render("    - /doc create API reference") + "\n"
+	rightColumn += descStyle.Render("    - /doc create installation guide") + "\n"
+	rightColumn += descStyle.Render("    - /doc for module internal") + "\n"
 
 	// Style both columns
 	columnStyle := lipgloss.NewStyle().

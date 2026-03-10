@@ -24,22 +24,16 @@ func flagVariant(flag string) *rapid.Generator[string] {
 }
 
 // TestProperty1_CommandFlagRecognition verifies that for any input string
-// containing a command flag (/project or /doc), the parser correctly identifies
-// that flag and sets the corresponding boolean field in the ParsedCommand result.
+// containing the /doc flag, the parser correctly identifies it and sets both
+// IsDocRequest and IsProjectWide to true (since /doc now implies project-wide).
 // **Validates: Requirements 1.1, 1.2**
 func TestProperty1_CommandFlagRecognition(t *testing.T) {
 	rapid.Check(t, func(t *rapid.T) {
-		// Generate random text and a flag to test
+		// Generate random text and the /doc flag
 		text := safeText().Draw(t, "text")
-		flagType := rapid.SampledFrom([]string{"project", "doc"}).Draw(t, "flagType")
 
-		// Generate flag with random case variation
-		var flag string
-		if flagType == "project" {
-			flag = flagVariant("/project").Draw(t, "projectFlag")
-		} else {
-			flag = flagVariant("/doc").Draw(t, "docFlag")
-		}
+		// Generate /doc flag with random case variation
+		flag := flagVariant("/doc").Draw(t, "docFlag")
 
 		// Position flag randomly: before, after, or in middle of text
 		position := rapid.IntRange(0, 2).Draw(t, "position")
@@ -66,15 +60,12 @@ func TestProperty1_CommandFlagRecognition(t *testing.T) {
 			t.Fatalf("Parse failed: %v", err)
 		}
 
-		// Verify the correct flag was detected
-		if flagType == "project" {
-			if !result.IsProjectWide {
-				t.Fatalf("Expected IsProjectWide=true for input %q, got false", input)
-			}
-		} else {
-			if !result.IsDocRequest {
-				t.Fatalf("Expected IsDocRequest=true for input %q, got false", input)
-			}
+		// Verify /doc flag was detected and implies project-wide
+		if !result.IsDocRequest {
+			t.Fatalf("Expected IsDocRequest=true for input %q, got false", input)
+		}
+		if !result.IsProjectWide {
+			t.Fatalf("Expected IsProjectWide=true for input %q (implied by /doc), got false", input)
 		}
 	})
 }
@@ -142,26 +133,18 @@ func TestProperty3_NaturalLanguageExtraction(t *testing.T) {
 			t.Skip("empty natural text")
 		}
 
-		// Generate flags to add
+		// Generate flags to add - /doc is required, /project is optional for backward compatibility
 		includeProject := rapid.Bool().Draw(t, "includeProject")
-		includeDoc := rapid.Bool().Draw(t, "includeDoc")
-
-		// Ensure at least one flag is present
-		if !includeProject && !includeDoc {
-			includeDoc = true
-		}
 
 		// Build input with flags
 		var input string
-		if includeProject && includeDoc {
-			// Both flags
+		if includeProject {
+			// Both flags (backward compatibility)
 			projectFlag := flagVariant("/project").Draw(t, "projectFlag")
 			docFlag := flagVariant("/doc").Draw(t, "docFlag")
 			input = projectFlag + " " + docFlag + " " + naturalText
-		} else if includeProject {
-			projectFlag := flagVariant("/project").Draw(t, "projectFlag")
-			input = projectFlag + " " + naturalText
 		} else {
+			// Only /doc flag (new primary usage)
 			docFlag := flagVariant("/doc").Draw(t, "docFlag")
 			input = docFlag + " " + naturalText
 		}

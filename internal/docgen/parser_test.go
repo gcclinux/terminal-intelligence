@@ -45,16 +45,23 @@ func TestCommandParser_Parse_SingleFlag(t *testing.T) {
 		input           string
 		wantProjectWide bool
 		wantDocRequest  bool
+		wantErr         bool
 	}{
-		{"only project flag", "/project analyze codebase", true, false},
-		{"only doc flag", "/doc API reference", false, true},
-		{"project flag uppercase", "/PROJECT analyze", true, false},
-		{"doc flag uppercase", "/DOC create manual", false, true},
+		{"only project flag", "/project analyze codebase", false, false, true}, // /project alone is no longer valid for doc generation
+		{"only doc flag", "/doc API reference", true, true, false},             // /doc now implies project-wide
+		{"project flag uppercase", "/PROJECT analyze", false, false, true},     // /project alone is no longer valid for doc generation
+		{"doc flag uppercase", "/DOC create manual", true, true, false},        // /doc now implies project-wide
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := parser.Parse(tt.input)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("Parse() expected error but got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Parse() error = %v, want nil", err)
 			}
@@ -300,14 +307,21 @@ func TestCommandParser_Parse_EdgeCases(t *testing.T) {
 			want            string
 			wantProjectWide bool
 			wantDocRequest  bool
+			wantErr         bool
 		}{
-			{"project flag in middle", "create /project documentation", "create documentation", true, false},
-			{"doc flag in middle", "create /doc for the API", "create for the API", false, true},
+			{"project flag in middle", "create /project documentation", "create documentation", false, false, true}, // /project alone should error
+			{"doc flag in middle", "create /doc for the API", "create for the API", true, true, false},              // /doc implies project-wide
 		}
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
 				result, err := parser.Parse(tt.input)
+				if tt.wantErr {
+					if err == nil {
+						t.Fatalf("Parse() expected error but got nil")
+					}
+					return
+				}
 				if err != nil {
 					t.Fatalf("Parse() error = %v, want nil", err)
 				}

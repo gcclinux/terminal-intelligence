@@ -523,10 +523,10 @@ The AI can operate across your entire project, finding and modifying multiple fi
 
 **Generate Documentation**
 ```
-/project /doc create user manual
-/project /doc create API reference
-/project /doc create installation guide
-/project /doc for module internal
+/doc create user manual
+/doc create API reference
+/doc create installation guide
+/doc for module internal
 ```
 
 

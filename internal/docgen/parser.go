@@ -33,25 +33,21 @@ func (p *CommandParser) Parse(input string) (*ParsedCommand, error) {
 	// Normalize input for flag detection (case-insensitive)
 	lowerInput := strings.ToLower(input)
 
-	// Detect /project flag
-	if strings.Contains(lowerInput, "/project") {
-		result.IsProjectWide = true
-	}
-
-	// Detect /doc flag
+	// Detect /doc flag - this is now the primary flag for documentation generation
 	if strings.Contains(lowerInput, "/doc") {
 		result.IsDocRequest = true
+		result.IsProjectWide = true // /doc always implies project-wide analysis
 	}
 
-	// Validate that at least one flag is present
-	if !result.IsProjectWide && !result.IsDocRequest {
+	// Validate that /doc flag is present
+	if !result.IsDocRequest {
 		return nil, errors.New("no documentation flags detected")
 	}
 
 	// Extract natural language by removing flags
 	naturalLanguage := input
 
-	// Remove /project flag (case-insensitive)
+	// Remove /project flag if present (for backward compatibility)
 	projectFlagRegex := regexp.MustCompile(`(?i)/project\s*`)
 	naturalLanguage = projectFlagRegex.ReplaceAllString(naturalLanguage, "")
 
