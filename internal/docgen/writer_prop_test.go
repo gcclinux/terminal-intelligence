@@ -12,6 +12,9 @@ import (
 // **Validates: Requirements 7.1**
 // For any generated doc, file created on disk at workspace root
 func TestProperty18_FileOutputCreation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property-based test in short mode")
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		// Create temporary workspace
 		tmpDir := t.TempDir()
@@ -69,6 +72,9 @@ func TestProperty18_FileOutputCreation(t *testing.T) {
 // **Validates: Requirements 7.2, 7.3, 7.4, 7.5**
 // For any doc type, correct standard filename used
 func TestProperty19_StandardFilenameMapping(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property-based test in short mode")
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		// Create temporary workspace
 		tmpDir := t.TempDir()
@@ -115,6 +121,9 @@ func TestProperty19_StandardFilenameMapping(t *testing.T) {
 // **Validates: Requirements 7.6**
 // For any generation where file exists, conflict detected
 func TestProperty20_FileConflictDetection(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property-based test in short mode")
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		// Create temporary workspace
 		tmpDir := t.TempDir()

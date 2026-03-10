@@ -151,9 +151,9 @@ A change report is displayed when the operation completes, listing every file re
 ### Commands
 
 ```
-/project <request>          Run a project-wide change
-/preview /project <request> Dry-run: show what would change without writing files
-/proceed                    Apply the changes from the last dry-run
+/project <request>     Run a project-wide change
+/preview <request>     Dry-run: show what would change without writing files
+/proceed               Apply the changes from the last dry-run
 ```
 
 ### Examples
@@ -162,7 +162,7 @@ A change report is displayed when the operation completes, listing every file re
 /project add error handling to all HTTP client calls
 /project rename the Config struct to AppConfig everywhere
 /project improve the aichat pane height calculation
-/preview /project update all log.Printf calls to use structured logging
+/preview update all log.Printf calls to use structured logging
 ```
 
 ### Change Report
@@ -189,7 +189,7 @@ If nothing was changed: `No files were modified.`
 - Only files inside the workspace root are ever read or written
 - Symlinks that resolve outside the workspace are rejected
 - Paths returned by the AI that don't exist on disk are discarded (logged as "hallucinated paths")
-- Preview mode (`/preview /project`) never writes anything to disk
+- Preview mode (`/preview`) never writes anything to disk
 
 ### Supported File Types
 

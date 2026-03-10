@@ -2173,14 +2173,9 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  /fix      Force agentic mode (AI modifies code)\n"
 		helpText += "  /ask      Force conversational mode (no code changes)\n"
 		helpText += "  /doc      Generate project documentation\n"
-		helpText += "            Examples:\n"
-		helpText += "            -  /doc create user manual\n"
-		helpText += "            -  /doc create API reference\n"
-		helpText += "            -  /doc create installation guide\n"
-		helpText += "            -  /doc for module internal\n\n"
-		helpText += "  /preview  Preview changes before applying\n"
+		helpText += "  /preview  Preview changes without applying\n"
 		helpText += "  /project  Run a project-wide change across all files\n"
-		helpText += "  /proceed  Apply the last previewed /project change\n"
+		helpText += "  /proceed  Apply the last previewed change\n"
 		helpText += "  /model    Show current agent and model info\n"
 		helpText += "  /config   Edit configuration settings\n"
 		helpText += "  /help     Show this help message\n"
@@ -2215,11 +2210,12 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 	if trimmedForProject == "/proceed" {
 		if a.lastPreviewRequest == "" {
 			return func() tea.Msg {
-				return AINotificationMsg{Content: "Nothing to proceed with. Run /preview /project <request> first."}
+				return AINotificationMsg{Content: "Nothing to proceed with. Run /preview <request> first."}
 			}
 		}
-		// Re-issue as a real /project run using the stored request text.
-		message = "/project " + a.lastPreviewRequest
+		// Re-issue as a real run using the stored request text (without /preview)
+		// If it was a project-wide preview, re-run as project-wide
+		message = a.lastPreviewRequest
 		a.lastPreviewRequest = ""
 		isProjectCmd = true
 	}
@@ -2250,7 +2246,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			var bareRequest string
 			// If this was a preview, remind the user they can /proceed.
 			if isPreview {
-				// Extract the bare request text (strip /preview /project prefixes).
+				// Extract the bare request text (strip /preview and /project prefixes).
 				bare := strings.TrimSpace(msgCopy)
 				lower := strings.ToLower(bare)
 				if strings.HasPrefix(lower, "/preview") {
@@ -2260,6 +2256,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				if strings.HasPrefix(lower, "/project") {
 					bare = strings.TrimSpace(bare[len("/project"):])
 				}
+				// Store the bare request without any command prefixes
 				bareRequest = bare
 				formatted += "\nType /proceed to apply these changes."
 			}

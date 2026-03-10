@@ -496,7 +496,7 @@ The AI can operate across your entire project, finding and modifying multiple fi
 
 **Preview Without Writing**
 ```
-/preview /project <request>
+/preview <request>
 ```
 
 **Apply Last Preview**
@@ -518,7 +518,7 @@ The AI can operate across your entire project, finding and modifying multiple fi
 
 **Update Logging**
 ```
-/preview /project update all log.Printf calls to use structured logging
+/preview update all log.Printf calls to use structured logging
 ```
 
 **Generate Documentation**
@@ -561,7 +561,7 @@ Patch failures: 1
 - Prevents accidental system file modifications
 
 **Preview Mode**
-- `/preview /project` never writes to disk
+- `/preview` never writes to disk
 - Review all proposed changes first
 - Use `/proceed` to apply when ready
 
@@ -576,7 +576,7 @@ Patch failures: 1
 
 **1. Start with Preview**
 ```
-/preview /project <request>
+/preview <request>
 ```
 Always preview large or risky changes first.
 
@@ -1010,10 +1010,9 @@ python3 --version
 |---------|-------------|
 | `/fix <request>` | Force agentic mode (AI modifies code) |
 | `/ask <question>` | Force conversational mode (no changes) |
-| `/preview <request>` | Preview changes before applying |
+| `/preview <request>` | Preview changes before applying (dry-run) |
 | `/project <request>` | Project-wide change across all files |
-| `/preview /project` | Dry-run project-wide change (no writes) |
-| `/proceed` | Apply changes from last dry-run |
+| `/proceed` | Apply changes from last preview |
 | `/model` | Show current agent and model info |
 | `/config` | Edit configuration settings |
 | `/help` | Show help message |
@@ -1155,8 +1154,7 @@ If no config file exists:
 - AI provides better answers when it sees your code
 
 **5. Preview Before Applying**
-- Use `/preview` for single-file changes
-- Use `/preview /project` for multi-file changes
+- Use `/preview` for single-file or project-wide changes
 - Review before using `/proceed`
 
 ### AI Interaction Tips
@@ -1478,10 +1476,9 @@ Quit:         Ctrl+Q
 ```
 /fix <request>              - Modify code automatically
 /ask <question>             - Get explanation without changes
-/preview <request>          - Preview changes first
-/project <request>          - Multi-file operation
-/preview /project <request> - Preview multi-file changes
-/proceed                    - Apply last preview
+/preview <request>     - Preview changes first (dry-run)
+/project <request>     - Multi-file operation
+/proceed               - Apply last preview
 /config                     - Edit configuration
 /model                      - Show AI model info
 /help                       - Show help
@@ -1511,7 +1508,7 @@ Ctrl+G → Status → Stage → Commit → [message] → Push → Esc
 
 **Project-Wide Change:**
 ```
-/preview /project add logging → [review report] → /proceed
+/preview add logging → [review report] → /proceed
 ```
 
 

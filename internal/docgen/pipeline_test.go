@@ -31,6 +31,9 @@ func (m *MockAIClient) ListModels() ([]string, error) {
 // **Validates: Requirements 9.3**
 // For any multi-type generation, separate file for each type with appropriate filename
 func TestProperty26_MultiFileOutput(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property-based test in short mode")
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		tmpDir := t.TempDir()
 
@@ -82,6 +85,9 @@ func TestProperty26_MultiFileOutput(t *testing.T) {
 // **Validates: Requirements 10.3**
 // For any generation with scope filters, content only from filtered scope
 func TestProperty29_ScopeLimitedDocumentation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping property-based test in short mode")
+	}
 	rapid.Check(t, func(rt *rapid.T) {
 		tmpDir := t.TempDir()
 
