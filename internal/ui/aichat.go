@@ -117,6 +117,34 @@ type AINotificationMsg struct {
 	Content string // Notification content
 }
 
+// DocPipelineMsg is sent by the async documentation pipeline for each step.
+// Content holds a notification string; FileToOpen holds a path to open in editor;
+// Done signals the pipeline has finished.
+type DocPipelineMsg struct {
+	Content    string // Notification to display (empty if none)
+	FileToOpen string // File path to open in editor (empty if none)
+	Done       bool   // Whether the pipeline has finished
+	Err        error  // Non-nil if the pipeline encountered a fatal error
+	ch         chan DocPipelineMsg
+}
+
+// asyncChatPane is a ChatPaneInterface adapter that sends notifications
+// through a channel instead of directly mutating AIChatPane state.
+// This allows the pipeline to run in a goroutine while Bubble Tea
+// processes each notification as a separate update cycle.
+type asyncChatPane struct {
+	ch chan DocPipelineMsg
+}
+
+func (a *asyncChatPane) DisplayNotification(notification string) {
+	a.ch <- DocPipelineMsg{Content: notification, ch: a.ch}
+}
+
+func (a *asyncChatPane) OpenFileInEditor(filePath string) error {
+	a.ch <- DocPipelineMsg{FileToOpen: filePath, ch: a.ch}
+	return nil
+}
+
 // SaveConfigMsg is sent when user wants to save config changes.
 // Triggered by Esc in config mode.
 type SaveConfigMsg struct {
@@ -332,28 +360,8 @@ func (a *AIChatPane) GetActiveArea() int {
 // Returns:
 //   - tea.Cmd: Command that streams AI response
 func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
-	// Check if this is a documentation generation command
-	pipeline := docgen.NewPipeline(a.workspaceRoot, a.aiClient, a.model, a)
-	isDocCommand, err := pipeline.ProcessCommand(message)
-
-	if isDocCommand {
-		// Documentation command was processed
-		if err != nil {
-			a.DisplayNotification(fmt.Sprintf("Documentation generation error: %v", err))
-		}
-		// Check if a file needs to be opened
-		if a.fileToOpen != "" {
-			filePath := a.fileToOpen
-			a.fileToOpen = "" // Clear for next time
-			return func() tea.Msg {
-				return OpenFileInEditorMsg{FilePath: filePath}
-			}
-		}
-		// Return empty command since pipeline handles all feedback
-		return nil
-	}
-
-	// Add user message to history
+	// Always add the user message to history first so it appears in the chat panel
+	// regardless of whether this is a doc command or a regular AI message.
 	userMsg := types.ChatMessage{
 		Role:            "user",
 		Content:         message,
@@ -363,6 +371,31 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 	}
 	a.messages = append(a.messages, userMsg)
 	a.appendMessageToSessionLog(userMsg)
+
+	// Check if this is a documentation generation command (cheap parse, no pipeline execution)
+	parser := docgen.NewCommandParser()
+	parsed, parseErr := parser.Parse(message)
+	isDocCommand := parseErr == nil && parsed != nil && parsed.IsDocRequest
+
+	if isDocCommand {
+		// Run the pipeline asynchronously so each notification triggers a UI re-render.
+		ch := make(chan DocPipelineMsg, 32)
+		asyncPane := &asyncChatPane{ch: ch}
+
+		go func() {
+			asyncPipeline := docgen.NewPipeline(a.workspaceRoot, a.aiClient, a.model, asyncPane)
+			_, err := asyncPipeline.ProcessCommand(message)
+			ch <- DocPipelineMsg{Done: true, Err: err, ch: ch}
+		}()
+
+		// Return a tea.Cmd that reads the first message from the channel.
+		// Each DocPipelineMsg carries the channel so Update can chain the next read.
+		return func() tea.Msg {
+			return <-ch
+		}
+	}
+
+	// --- Regular AI message path ---
 
 	// Build prompt with context if provided
 	prompt := message
@@ -715,6 +748,32 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 		}
 	case AINotificationMsg:
 		a.DisplayNotification(msg.Content)
+	case DocPipelineMsg:
+		// Display notification if present
+		if msg.Content != "" {
+			a.DisplayNotification(msg.Content)
+		}
+		// If pipeline is not done yet, keep reading from the channel
+		if !msg.Done {
+			ch := msg.ch
+			// If a file also needs to be opened, batch both commands
+			if msg.FileToOpen != "" {
+				filePath := msg.FileToOpen
+				return tea.Batch(
+					func() tea.Msg { return OpenFileInEditorMsg{FilePath: filePath} },
+					func() tea.Msg { return <-ch },
+				)
+			}
+			return func() tea.Msg { return <-ch }
+		}
+		// Pipeline finished
+		if msg.FileToOpen != "" {
+			filePath := msg.FileToOpen
+			return func() tea.Msg { return OpenFileInEditorMsg{FilePath: filePath} }
+		}
+		if msg.Err != nil {
+			a.DisplayNotification(fmt.Sprintf("Documentation generation error: %v", msg.Err))
+		}
 	case TerminalOutputMsg:
 		// Ignore output if process was killed by user
 		if !a.processKilled {

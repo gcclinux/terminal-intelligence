@@ -32,9 +32,9 @@ func NewRequestClassifier() *RequestClassifier {
 			},
 			DocTypeTutorial: {
 				"tutorial",
-				"guide",
 				"walkthrough",
-				"example",
+				"step by step",
+				"step-by-step",
 			},
 		},
 	}

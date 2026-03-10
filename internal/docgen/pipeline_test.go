@@ -363,6 +363,85 @@ func TestPipeline_FileConflict(t *testing.T) {
 	}
 }
 
+// MockUnavailableAIClient is a mock AIClient where IsAvailable returns false
+type MockUnavailableAIClient struct{}
+
+func (m *MockUnavailableAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+	ch := make(chan string)
+	close(ch)
+	return ch, nil
+}
+
+func (m *MockUnavailableAIClient) IsAvailable() (bool, error) {
+	return false, nil
+}
+
+func (m *MockUnavailableAIClient) ListModels() ([]string, error) {
+	return nil, nil
+}
+
+// TestNewPipeline_ConstructsNonNilAIGenerator verifies that NewPipeline returns a non-nil
+// pipeline (and by extension a non-nil aiGenerator, since NewPipeline always constructs one).
+// Requirements: 6.2
+func TestNewPipeline_ConstructsNonNilAIGenerator(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockPane := &MockChatPane{}
+	mockAI := &MockAIClient{}
+
+	p := NewPipeline(tmpDir, mockAI, "test-model", mockPane)
+
+	if p == nil {
+		t.Fatal("NewPipeline returned nil pipeline")
+	}
+	if p.aiGenerator == nil {
+		t.Fatal("NewPipeline did not initialise aiGenerator (got nil)")
+	}
+}
+
+// TestPipeline_AIUnavailable_NoFilesWritten verifies that when IsAvailable returns false,
+// NotifyError is called and no files are written to disk.
+// Requirements: 4.1, 6.2
+func TestPipeline_AIUnavailable_NoFilesWritten(t *testing.T) {
+	tmpDir := t.TempDir()
+	mockPane := &MockChatPane{}
+	mockAI := &MockUnavailableAIClient{}
+
+	pipeline := NewPipeline(tmpDir, mockAI, "test-model", mockPane)
+
+	isDocCommand, err := pipeline.ProcessCommand("/project /doc create user manual")
+
+	if !isDocCommand {
+		t.Fatal("Command should be recognised as a doc command")
+	}
+	if err != nil {
+		t.Fatalf("Pipeline returned unexpected error: %v", err)
+	}
+
+	// No .md files should have been written
+	entries, readErr := os.ReadDir(tmpDir)
+	if readErr != nil {
+		t.Fatalf("Failed to read temp dir: %v", readErr)
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".md") {
+			t.Errorf("Unexpected file written when AI unavailable: %s", e.Name())
+		}
+	}
+
+	// NotifyError must have been called with an "unavailable" message
+	notifications := mockPane.GetNotifications()
+	foundError := false
+	for _, n := range notifications {
+		if strings.Contains(strings.ToLower(n), "unavailable") || strings.Contains(strings.ToLower(n), "error") {
+			foundError = true
+			break
+		}
+	}
+	if !foundError {
+		t.Errorf("Expected an error notification about AI unavailability, got: %v", notifications)
+	}
+}
+
 // Helper function to create a simple test project
 func createTestProject(t *testing.T, dir string) {
 	// Create a simple Go file

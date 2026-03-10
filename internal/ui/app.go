@@ -671,7 +671,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, tea.Batch(cmds...)
 
-	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg, ClearStatusMsg:
+	case TerminalOutputMsg, TerminalDoneMsg, AIResponseMsg, AINotificationMsg, AIAvailabilityMsg, ClearStatusMsg, DocPipelineMsg:
 		// Handle ClearStatusMsg
 		if _, ok := msg.(ClearStatusMsg); ok {
 			a.statusMessage = ""

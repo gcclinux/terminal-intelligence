@@ -337,7 +337,75 @@ func (g *DocumentationGenerator) generateAPIDocumentation() (string, error) {
 func (g *DocumentationGenerator) generateTutorial() string {
 	var sb strings.Builder
 	sb.WriteString("# Tutorial\n\n")
-	sb.WriteString("This tutorial will guide you through using this application.\n\n")
+
+	// Overview from README
+	if g.analysisResult.Documentation != nil && g.analysisResult.Documentation.ReadmeContent != "" {
+		overview := extractOverview(g.analysisResult.Documentation.ReadmeContent)
+		sb.WriteString("## Introduction\n\n")
+		sb.WriteString(overview)
+		sb.WriteString("\n\n")
+	} else {
+		sb.WriteString("This tutorial will guide you through using this application.\n\n")
+	}
+
+	// Prerequisites / Installation
+	sb.WriteString("## Prerequisites\n\n")
+	if g.analysisResult.Configuration != nil {
+		for _, manifest := range g.analysisResult.Configuration.PackageManifests {
+			if strings.Contains(manifest, "go.mod") {
+				sb.WriteString("- Go 1.16 or higher installed\n")
+			} else if strings.Contains(manifest, "package.json") {
+				sb.WriteString("- Node.js 14 or higher installed\n")
+			} else if strings.Contains(manifest, "requirements.txt") {
+				sb.WriteString("- Python 3.7 or higher installed\n")
+			}
+		}
+	}
+	sb.WriteString("\n")
+
+	// Getting Started
+	sb.WriteString("## Getting Started\n\n")
+	steps := g.extractInstallationSteps()
+	if len(steps) > 0 {
+		for i, step := range steps {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, step))
+		}
+	} else {
+		sb.WriteString(g.generateDefaultInstallationSteps())
+	}
+	sb.WriteString("\n")
+
+	// Key Features walkthrough
+	if g.analysisResult.CodeStructure != nil && len(g.analysisResult.CodeStructure.Functions) > 0 {
+		sb.WriteString("## Key Features\n\n")
+		count := 0
+		for _, fn := range g.analysisResult.CodeStructure.Functions {
+			if fn.IsExported && fn.Comment != "" {
+				sb.WriteString(fmt.Sprintf("### %s\n\n", fn.Name))
+				sb.WriteString(fmt.Sprintf("%s\n\n", fn.Comment))
+				count++
+				if count >= 5 {
+					break
+				}
+			}
+		}
+	}
+
+	// Keyboard shortcuts
+	shortcuts := g.extractKeyboardShortcuts()
+	if len(shortcuts) > 0 {
+		sb.WriteString("## Keyboard Shortcuts\n\n")
+		for _, shortcut := range shortcuts {
+			sb.WriteString(fmt.Sprintf("- **%s**: %s\n", shortcut.Key, shortcut.Description))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Next steps
+	sb.WriteString("## Next Steps\n\n")
+	sb.WriteString("- Refer to the `USER_MANUAL.md` for a complete feature reference\n")
+	sb.WriteString("- Check the project README for additional resources\n")
+
 	return sb.String()
 }
 

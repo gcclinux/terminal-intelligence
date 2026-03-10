@@ -11,7 +11,7 @@ type Pipeline struct {
 	parser        *CommandParser
 	classifier    *RequestClassifier
 	analyzer      *ProjectAnalyzer
-	generator     *DocumentationGenerator
+	aiGenerator   *AIGenerator
 	writer        *FileWriter
 	feedback      *FeedbackManager
 	workspaceRoot string
@@ -21,11 +21,14 @@ type Pipeline struct {
 
 // NewPipeline creates a new documentation generation pipeline
 func NewPipeline(workspaceRoot string, aiClient ai.AIClient, model string, chatPane ChatPaneInterface) *Pipeline {
+	feedback := NewFeedbackManager(chatPane)
+	aiGen := NewAIGenerator(aiClient, model, feedback)
 	return &Pipeline{
 		parser:        NewCommandParser(),
 		classifier:    NewRequestClassifier(),
 		writer:        NewFileWriter(workspaceRoot),
-		feedback:      NewFeedbackManager(chatPane),
+		feedback:      feedback,
+		aiGenerator:   aiGen,
 		workspaceRoot: workspaceRoot,
 		aiClient:      aiClient,
 		model:         model,
@@ -55,6 +58,13 @@ func (p *Pipeline) ProcessCommand(input string) (bool, error) {
 func (p *Pipeline) generateDocumentation(parsed *ParsedCommand) error {
 	// Classify the request
 	classification := p.classifier.Classify(parsed.NaturalLanguage)
+
+	// Check AI availability before creating any files
+	available, err := p.aiClient.IsAvailable()
+	if err != nil || !available {
+		p.feedback.NotifyError(fmt.Errorf("AI service is unavailable"))
+		return nil
+	}
 
 	// Notify start
 	p.feedback.NotifyStart(classification.Types)
@@ -125,8 +135,7 @@ func (p *Pipeline) generateDocumentation(parsed *ParsedCommand) error {
 
 	// Step 5: Generate documentation
 	p.feedback.NotifyProgress("Generating documentation", "")
-	p.generator = NewDocumentationGenerator(analysisResult)
-	docs, err := p.generator.GenerateMultiple(classification.Types)
+	docs, err := p.aiGenerator.GenerateMultiple(analysisResult, classification.Types)
 	if err != nil {
 		p.feedback.NotifyError(fmt.Errorf("generation failed: %w", err))
 		return err
@@ -181,6 +190,13 @@ func (p *Pipeline) generateDocumentationWithOverwrite(parsed *ParsedCommand, ove
 	// Classify the request
 	classification := p.classifier.Classify(parsed.NaturalLanguage)
 
+	// Check AI availability before creating any files
+	available, err := p.aiClient.IsAvailable()
+	if err != nil || !available {
+		p.feedback.NotifyError(fmt.Errorf("AI service is unavailable"))
+		return nil
+	}
+
 	// Notify start
 	p.feedback.NotifyStart(classification.Types)
 
@@ -195,8 +211,7 @@ func (p *Pipeline) generateDocumentationWithOverwrite(parsed *ParsedCommand, ove
 
 	// Generate documentation
 	p.feedback.NotifyProgress("Generating documentation", "")
-	p.generator = NewDocumentationGenerator(analysisResult)
-	docs, err := p.generator.GenerateMultiple(classification.Types)
+	docs, err := p.aiGenerator.GenerateMultiple(analysisResult, classification.Types)
 	if err != nil {
 		p.feedback.NotifyError(fmt.Errorf("generation failed: %w", err))
 		return err
