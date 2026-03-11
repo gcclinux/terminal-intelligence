@@ -2,9 +2,12 @@ package agentic
 
 import (
 	"fmt"
+	"go/parser"
 	"go/scanner"
 	"go/token"
 	"log"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 )
@@ -562,9 +565,29 @@ func checkPowerShellControlStructures(code string) error {
 	return nil
 }
 
-// validatePythonSyntax performs basic Python syntax validation
+// validatePythonSyntax performs advanced Python syntax validation
 func validatePythonSyntax(code string) error {
-	// Basic checks for common Python syntax errors
+	// 1. Try using the python CLI to compile the code if available
+	if _, err := exec.LookPath("python"); err == nil {
+		f, err := os.CreateTemp("", "ti_validate_*.py")
+		if err == nil {
+			f.WriteString(code)
+			f.Close()
+			defer os.Remove(f.Name())
+
+			cmd := exec.Command("python", "-m", "py_compile", f.Name())
+			if out, err := cmd.CombinedOutput(); err != nil {
+				outStr := string(out)
+				if strings.Contains(outStr, "SyntaxError:") || strings.Contains(outStr, "IndentationError:") {
+					lines := strings.Split(strings.TrimSpace(outStr), "\n")
+					// Return the last line which usually contains the precise error
+					return fmt.Errorf("python syntax error: %s", lines[len(lines)-1])
+				}
+			}
+		}
+	}
+
+	// 2. Fallback: Basic checks for common Python syntax errors
 
 	// Check for unmatched quotes
 	if err := checkUnmatchedQuotes(code); err != nil {
@@ -624,13 +647,32 @@ func checkPythonIndentation(code string) error {
 	return nil
 }
 
-// validateGoSyntax performs basic Go syntax validation using go/scanner
+// validateGoSyntax performs syntax validation using go/parser and go/scanner
 func validateGoSyntax(code string) error {
-	var s scanner.Scanner
 	fset := token.NewFileSet()
-	file := fset.AddFile("", fset.Base(), len(code))
+	
+	// 1. Try parsing as a complete Go file first
+	_, err := parser.ParseFile(fset, "", code, parser.AllErrors)
+	if err == nil {
+		return nil
+	}
+	
+	// If it fails because it's missing 'package', try wrapping it.
+	// This helps validate snippets instead of full files.
+	if strings.Contains(err.Error(), "expected 'package'") {
+		dummyCode := "package main\nfunc dummy() {\n" + code + "\n}"
+		if _, err2 := parser.ParseFile(fset, "", dummyCode, parser.AllErrors); err2 == nil {
+			return nil
+		}
+	} else if !strings.Contains(err.Error(), "expected 'package'") {
+		// If it has a real syntax error, report it.
+		// We format the parser error for readability.
+		return fmt.Errorf("go syntax error: %v", err)
+	}
 
-	// Use scanner to properly handle comments and strings
+	// 2. Fallback: use scanner to properly handle comments and strings
+	var s scanner.Scanner
+	file := fset.AddFile("", fset.Base(), len(code))
 	s.Init(file, []byte(code), nil, 0)
 
 	braces := 0

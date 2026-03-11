@@ -56,7 +56,7 @@ func TestFileScannerSkipDirs(t *testing.T) {
 	// Create a legitimate file at the root level.
 	createFile(t, filepath.Join(root, "main.go"), "package main")
 
-	scanner := newFileScanner(root)
+	scanner := newFileScanner(root, 500)
 	paths, _, err := scanner.scan()
 	if err != nil {
 		t.Fatalf("scan() error: %v", err)
@@ -108,7 +108,7 @@ func TestFileScannerExtensionFilter(t *testing.T) {
 		createFile(t, filepath.Join(root, name), "content")
 	}
 
-	scanner := newFileScanner(root)
+	scanner := newFileScanner(root, 500)
 	paths, _, err := scanner.scan()
 	if err != nil {
 		t.Fatalf("scan() error: %v", err)
@@ -149,7 +149,7 @@ func TestFileScannerTruncation(t *testing.T) {
 	// One short-path file at root level.
 	createFile(t, filepath.Join(root, "short.go"), "package main")
 
-	scanner := newFileScanner(root)
+	scanner := newFileScanner(root, 500)
 	paths, truncated, err := scanner.scan()
 	if err != nil {
 		t.Fatalf("scan() error: %v", err)
@@ -285,7 +285,7 @@ return "world"
 	)
 
 	absFilePath, _ := filepath.Abs(filePath)
-	_, _, _, _, err := editor.edit([]string{absFilePath}, "change hello to world")
+	_, _, _, _, _, err := editor.edit([]string{absFilePath}, "change hello to world")
 	if err != nil {
 		t.Fatalf("edit() error: %v", err)
 	}
@@ -366,5 +366,66 @@ func hello() string { // changed
 	// Empty text — never a duplicate.
 	if hasDuplicateSearchMarkers("") {
 		t.Error("hasDuplicateSearchMarkers should return false for empty text")
+	}
+}
+
+func TestGitIgnoreMatcher(t *testing.T) {
+	root := t.TempDir()
+	gitignoreContent := `
+node_modules/
+*.log
+temp
+# comment
+/dist
+`
+	err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte(gitignoreContent), 0o644)
+	if err != nil {
+		t.Fatalf("failed to write .gitignore: %v", err)
+	}
+
+	matcher := newGitIgnoreMatcher(root)
+
+	tests := []struct {
+		path     string
+		expected bool
+	}{
+		{"node_modules/package.json", true},
+		{"src/node_modules/package.json", true},
+		{"app.log", true},
+		{"logs/error.log", true},
+		{"temp", true},
+		{"temp/file.txt", true},
+		{"dist", true},
+		{"src/dist", false}, // matches /dist only at root
+		{"main.go", false},
+	}
+
+	for _, tt := range tests {
+		actual := matcher.matches(tt.path)
+		if actual != tt.expected {
+			t.Errorf("expected matches(%q) to be %v, got %v", tt.path, tt.expected, actual)
+		}
+	}
+}
+
+func TestExtractExecuteCommand(t *testing.T) {
+	response := `
+Here is your complete code fix!
+=== FILE: main.go ===
+~~~SEARCH
+func hello()
+~~~REPLACE
+func helloWorld()
+~~~END
+
+And here is the command to verify:
+~~~EXECUTE
+go test ./...
+~~~END
+`
+	expected := "go test ./..."
+	actual := extractExecuteCommand(response)
+	if actual != expected {
+		t.Errorf("expected %q, got %q", expected, actual)
 	}
 }

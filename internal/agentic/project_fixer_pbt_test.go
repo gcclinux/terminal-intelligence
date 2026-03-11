@@ -79,7 +79,7 @@ func TestPropFileScannerSkipDirs(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		scanner := newFileScanner(root)
+		scanner := newFileScanner(root, 500)
 		paths, _, err := scanner.scan()
 		if err != nil {
 			t.Fatalf("scan() error: %v", err)
@@ -134,7 +134,7 @@ func TestPropFileScannerAllowedExtensions(t *testing.T) {
 			}
 		}
 
-		scanner := newFileScanner(root)
+		scanner := newFileScanner(root, 500)
 		paths, _, err := scanner.scan()
 		if err != nil {
 			t.Fatalf("scan() error: %v", err)
@@ -185,7 +185,7 @@ func TestPropFileScannerTruncation(t *testing.T) {
 			}
 		}
 
-		scanner := newFileScanner(root)
+		scanner := newFileScanner(root, 500)
 		paths, truncated, err := scanner.scan()
 		if err != nil {
 			t.Fatalf("scan() error: %v", err)
@@ -299,7 +299,7 @@ func TestPropPathSafetyNoOutOfScope(t *testing.T) {
 			true, // preview — we don't want actual writes
 		)
 
-		_, _, _, outOfScope, err := editor.edit(allPaths, "patch files")
+		_, _, _, outOfScope, _, err := editor.edit(allPaths, "patch files")
 		if err != nil {
 			t.Fatalf("edit() error: %v", err)
 		}
@@ -482,7 +482,7 @@ func TestPropFailedPatchPreservesContent(t *testing.T) {
 		)
 
 		absFilePath, _ := filepath.Abs(filePath)
-		_, failures, _, _, err := editor.edit([]string{absFilePath}, "patch file")
+		_, failures, _, _, _, err := editor.edit([]string{absFilePath}, "patch file")
 		if err != nil {
 			t.Fatalf("edit() error: %v", err)
 		}
@@ -571,7 +571,7 @@ func TestPropChangeReportCompleteness(t *testing.T) {
 			true, // preview
 		)
 
-		modified, failures, unreadable, outOfScope, err := editor.edit(allPaths, "patch files")
+		modified, failures, unreadable, outOfScope, _, err := editor.edit(allPaths, "patch files")
 		if err != nil {
 			t.Fatalf("edit() error: %v", err)
 		}
@@ -637,18 +637,24 @@ func TestPropPreviewModeWritesNothing(t *testing.T) {
 			content string
 			rel     string
 		}
-		files := make([]fileRecord, numFiles)
+		var files []fileRecord
 		var aiResponseParts []string
+		usedNames := make(map[string]bool)
 
 		for i := 0; i < numFiles; i++ {
 			name := safeFileName().Draw(t, fmt.Sprintf("fileName%d", i))
+			if usedNames[name] {
+				name += fmt.Sprintf("uniq%d", i)
+			}
+			usedNames[name] = true
+			
 			content := safeContent().Draw(t, fmt.Sprintf("fileContent%d", i))
 			p := filepath.Join(root, name+".go")
 			if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 				t.Fatal(err)
 			}
 			rel, _ := filepath.Rel(root, p)
-			files[i] = fileRecord{path: p, content: content, rel: rel}
+			files = append(files, fileRecord{path: p, content: content, rel: rel})
 
 			// Build a valid patch for each file.
 			replacement := safeContent().Draw(t, fmt.Sprintf("replacement%d", i))
@@ -675,7 +681,7 @@ func TestPropPreviewModeWritesNothing(t *testing.T) {
 			true, // PREVIEW MODE
 		)
 
-		_, _, _, _, err = editor.edit(absPaths, "patch files")
+		_, _, _, _, _, err = editor.edit(absPaths, "patch files")
 		if err != nil {
 			t.Fatalf("edit() error: %v", err)
 		}
@@ -741,7 +747,7 @@ func TestPropDuplicateSearchRejected(t *testing.T) {
 		)
 
 		absFilePath, _ := filepath.Abs(filePath)
-		_, failures, _, _, err := editor.edit([]string{absFilePath}, "patch file")
+		_, failures, _, _, _, err := editor.edit([]string{absFilePath}, "patch file")
 		if err != nil {
 			t.Fatalf("edit() error: %v", err)
 		}
