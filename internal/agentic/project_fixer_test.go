@@ -268,13 +268,13 @@ func TestPreviewModeNoWrites(t *testing.T) {
 	createFile(t, filePath, originalContent)
 
 	// Build a valid patch that would change "hello" to "world".
-	aiResponse := fmt.Sprintf(`=== FILE: hello.go ===
+	aiResponse := `=== FILE: hello.go ===
 ~~~SEARCH
 return "hello"
 ~~~REPLACE
 return "world"
 ~~~END
-`)
+`
 
 	editor := newMultiFileEditor(
 		&stubAIClient{response: aiResponse},
