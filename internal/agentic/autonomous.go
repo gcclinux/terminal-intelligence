@@ -13,7 +13,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/ai"
 )
 
-var projectNameRe = regexp.MustCompile(`(?im)^[#*\-\s]*project\s*name\s*[:\-]?\s*([a-z0-9\-]+)`)
+var projectNameRe = regexp.MustCompile(`(?im)project\s*name\s*[:\-]?\s*` + "`?" + `([a-z0-9\-_]+)` + "`?")
 
 // CreatorState represents the current state of the Autonomous Creator state machine.
 type CreatorState int
@@ -119,13 +119,43 @@ Please provide an implementation plan. Include:
 }
 
 func (c *AutonomousCreator) doSetup() (string, error) {
+	// Check if project directory already exists and find an available name
+	originalName := c.ProjectName
+	counter := 1
+
+	for {
+		if _, err := os.Stat(c.ProjectDir); os.IsNotExist(err) {
+			// Directory doesn't exist, we can use it
+			break
+		}
+
+		// Directory exists, try with a number suffix
+		c.ProjectName = fmt.Sprintf("%s-%d", originalName, counter)
+		c.ProjectDir = filepath.Join(c.Workspace, c.ProjectName)
+		counter++
+
+		// Safety check to avoid infinite loop
+		if counter > 100 {
+			return "", fmt.Errorf("too many existing project directories with name %s", originalName)
+		}
+	}
+
 	// Create project directory
 	if err := os.MkdirAll(c.ProjectDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create project directory: %v", err)
 	}
 
+	var message string
+	if c.ProjectName != originalName {
+		message = fmt.Sprintf("ai-assist %s\nNote: Directory '%s' already exists.\nCreated project folder: %s\n\nMoving to install dependencies...",
+			getCurrentTime(), originalName, c.ProjectName)
+	} else {
+		message = fmt.Sprintf("ai-assist %s\nCreated project folder: %s\n\nMoving to install dependencies...",
+			getCurrentTime(), c.ProjectName)
+	}
+
 	c.State = StateDependencies
-	return fmt.Sprintf("ai-assist %s\nCreated project folder: %s\n\nMoving to install dependencies...", getCurrentTime(), c.ProjectName), nil
+	return message, nil
 }
 
 func (c *AutonomousCreator) doDependencies() (string, error) {
@@ -258,6 +288,14 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 		createdFiles = append(createdFiles, relPath)
 	}
 
+	// Post-creation dependency resolution for Go projects
+	projectType := c.detectProjectType()
+	if projectType == "Go" {
+		if err := c.runGoModTidy(); err != nil {
+			return "", fmt.Errorf("failed to run go mod tidy: %v", err)
+		}
+	}
+
 	c.State = StateTesting
 	return fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n\nMoving to testing...", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")), nil
 }
@@ -319,9 +357,8 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 		os.Remove(scriptPath)
 
 		if err != nil {
-			// On error we let the AI try to fix it, or simply return the error and halt.
-			// Implementing self-healing here goes beyond simple flow, but we can do a single pass:
-			return "", fmt.Errorf("Automated test failed: %v\nOutput: %s\n\nAborting autonomous creation.", err, string(out))
+			// Try to fix the error automatically
+			return c.attemptTestFix(projectType, cmdStr, string(out), err)
 		}
 	}
 
@@ -655,10 +692,36 @@ func aicall(client ai.AIClient, model, prompt string) (string, error) {
 }
 
 func extractProjectName(plan string) string {
+	// Try the standard "Project Name:" format first
 	matches := projectNameRe.FindStringSubmatch(plan)
 	if len(matches) >= 2 && matches[1] != "" {
-		return strings.TrimSpace(matches[1])
+		name := strings.TrimSpace(matches[1])
+		// Remove backticks if present
+		name = strings.Trim(name, "`")
+		return name
 	}
+
+	// Try to find project name in backticks on its own line
+	// Pattern: `project-name` on a line by itself or after "Project Name"
+	backticksRe := regexp.MustCompile("(?m)`([a-z0-9][a-z0-9\\-_]*)`")
+	backticksMatches := backticksRe.FindAllStringSubmatch(plan, -1)
+
+	// Look for the first backtick-enclosed name that looks like a project name
+	for _, match := range backticksMatches {
+		if len(match) >= 2 {
+			name := match[1]
+			// Check if it looks like a project name (contains hyphens or underscores)
+			if strings.Contains(name, "-") || strings.Contains(name, "_") {
+				return name
+			}
+		}
+	}
+
+	// If we found any backtick name, use the first one
+	if len(backticksMatches) > 0 && len(backticksMatches[0]) >= 2 {
+		return backticksMatches[0][1]
+	}
+
 	return "autonomous-app"
 }
 
@@ -821,4 +884,68 @@ func (c *AutonomousCreator) findMainPowerShellFile() string {
 	}
 
 	return ""
+}
+
+// runGoModTidy runs go mod tidy to download dependencies
+func (c *AutonomousCreator) runGoModTidy() error {
+	cmd := exec.Command("go", "mod", "tidy")
+	cmd.Dir = c.ProjectDir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("go mod tidy failed: %v\nOutput: %s", err, string(output))
+	}
+	return nil
+}
+
+// attemptTestFix tries to automatically fix test failures
+func (c *AutonomousCreator) attemptTestFix(projectType, testCmd, output string, testErr error) (string, error) {
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("ai-assist %s\nTest failed. Attempting automatic fix...\n\n", getCurrentTime()))
+	result.WriteString(fmt.Sprintf("Error: %v\n", testErr))
+	result.WriteString(fmt.Sprintf("Output:\n%s\n\n", output))
+
+	// Check for common Go dependency issues
+	if projectType == "Go" && strings.Contains(output, "missing go.sum entry") {
+		result.WriteString("Detected missing dependencies. Running 'go mod tidy'...\n")
+
+		if err := c.runGoModTidy(); err != nil {
+			return "", fmt.Errorf("automatic fix failed: %v", err)
+		}
+
+		result.WriteString("Dependencies resolved. Retrying test...\n\n")
+
+		// Retry the test
+		scriptPath := filepath.Join(c.ProjectDir, "test.sh")
+		if runtime.GOOS == "windows" {
+			scriptPath = filepath.Join(c.ProjectDir, "test.bat")
+		}
+
+		err := os.WriteFile(scriptPath, []byte(testCmd), 0755)
+		if err != nil {
+			return "", fmt.Errorf("failed to write retry test script: %v", err)
+		}
+
+		var cmd *exec.Cmd
+		if runtime.GOOS == "windows" {
+			cmd = exec.Command("cmd", "/C", "test.bat")
+		} else {
+			cmd = exec.Command("sh", "test.sh")
+		}
+		cmd.Dir = c.ProjectDir
+		retryOut, retryErr := cmd.CombinedOutput()
+		os.Remove(scriptPath)
+
+		if retryErr != nil {
+			result.WriteString(fmt.Sprintf("Retry failed: %v\n", retryErr))
+			result.WriteString(fmt.Sprintf("Output:\n%s\n\n", string(retryOut)))
+			return "", fmt.Errorf("automated test failed after fix attempt:\n%s", result.String())
+		}
+
+		result.WriteString("✓ Test passed after automatic fix!\n\n")
+		c.State = StateDocumentation
+		return result.String() + fmt.Sprintf("ai-assist %s\nMoving to documentation...", getCurrentTime()), nil
+	}
+
+	// For other errors, just report and abort
+	return "", fmt.Errorf("automated test failed: %v\nOutput: %s\n\nAborting autonomous creation.", testErr, output)
 }

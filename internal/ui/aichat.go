@@ -682,13 +682,18 @@ func (a *AIChatPane) ensureTiDirInGitignore() {
 // appendMessageToSessionLog appends a new message to the automated session log file.
 func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 	if a.workspaceRoot == "" {
+		// Log to stderr for debugging
+		fmt.Fprintf(os.Stderr, "Warning: workspaceRoot is empty, cannot save session\n")
 		return
 	}
 
 	tiDir := filepath.Join(a.workspaceRoot, ".ti")
 	tiDirCreated := false
 	if _, err := os.Stat(tiDir); os.IsNotExist(err) {
-		os.MkdirAll(tiDir, 0755)
+		if err := os.MkdirAll(tiDir, 0755); err != nil {
+			fmt.Fprintf(os.Stderr, "Error creating .ti directory: %v\n", err)
+			return
+		}
 		tiDirCreated = true
 	}
 
@@ -703,6 +708,7 @@ func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 
 	f, err := os.OpenFile(a.sessionFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error opening session file %s: %v\n", a.sessionFile, err)
 		return
 	}
 	defer f.Close()
@@ -715,7 +721,9 @@ func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 	content.WriteString(msg.Content)
 	content.WriteString("\n\n")
 
-	f.WriteString(content.String())
+	if _, err := f.WriteString(content.String()); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing to session file: %v\n", err)
+	}
 }
 
 // GetHistory returns conversation history.

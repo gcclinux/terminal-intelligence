@@ -318,3 +318,51 @@ func TestFindMainPowerShellFile(t *testing.T) {
 		})
 	}
 }
+
+func TestExtractProjectName(t *testing.T) {
+	tests := []struct {
+		name     string
+		plan     string
+		expected string
+	}{
+		{
+			name:     "Standard format with colon",
+			plan:     `### 1. Project Name: my-app`,
+			expected: "my-app",
+		},
+		{
+			name:     "Backticks format",
+			plan:     "### 1. Project Name\n`go-time-app`",
+			expected: "go-time-app",
+		},
+		{
+			name:     "Backticks with underscores",
+			plan:     "Project Name: `sys_stats`",
+			expected: "sys_stats",
+		},
+		{
+			name:     "Multiple backticks, use first with hyphens",
+			plan:     "`go-time-app`\nSome text\n`another`",
+			expected: "go-time-app",
+		},
+		{
+			name:     "No project name found",
+			plan:     "This is a plan without a project name",
+			expected: "autonomous-app",
+		},
+		{
+			name:     "Project name with numbers",
+			plan:     "Project Name: `app-v2`",
+			expected: "app-v2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := extractProjectName(tt.plan)
+			if result != tt.expected {
+				t.Errorf("extractProjectName() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
