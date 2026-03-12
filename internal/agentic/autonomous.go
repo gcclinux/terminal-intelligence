@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/user/terminal-intelligence/internal/ai"
@@ -414,6 +415,8 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 					serverCmd = exec.Command("bash", "-c", cmdStr)
 				}
 				serverCmd.Dir = c.ProjectDir
+				// Put server in its own process group so we can kill all children (e.g. Flask reloader)
+				serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 				startErr := serverCmd.Start()
 				if startErr != nil {
@@ -424,9 +427,9 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 				msg := fmt.Sprintf("ai-assist %s\nServer started in background for smoke test (PID %d).\nListening at: %s\n\nWaiting 20 seconds to verify it stays up...",
 					getCurrentTime(), serverCmd.Process.Pid, url)
 
-				// Sleep 20s then kill
+				// Sleep 20s then kill the entire process group
 				time.Sleep(20 * time.Second)
-				_ = serverCmd.Process.Kill()
+				_ = syscall.Kill(-serverCmd.Process.Pid, syscall.SIGKILL)
 				_, _ = serverCmd.Process.Wait()
 
 				c.State = StateDocumentation
