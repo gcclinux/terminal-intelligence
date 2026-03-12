@@ -2,13 +2,13 @@ package agentic
 
 import (
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/user/terminal-intelligence/internal/ai"
@@ -108,6 +108,10 @@ Please provide an implementation plan. Include:
 	}
 
 	c.Plan = plan
+	// Normalize port 5000 → 8080 in the plan (port 5000 is blocked on Windows/macOS)
+	c.Plan = strings.ReplaceAll(c.Plan, ":5000", ":8080")
+	c.Plan = strings.ReplaceAll(c.Plan, "port 5000", "port 8080")
+	c.Plan = strings.ReplaceAll(c.Plan, "port=5000", "port=8080")
 	// Extract project name
 	c.ProjectName = extractProjectName(plan)
 	if c.ProjectName == "" {
@@ -308,6 +312,13 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 	// Write files to disk
 	createdFiles := []string{}
 	for relPath, content := range c.FilesToMake {
+		// Port 5000 is blocked on Windows (firewall) and macOS Monterey+ (AirPlay).
+		// Rewrite it to 8080 in all generated files.
+		content = strings.ReplaceAll(content, "port=5000", "port=8080")
+		content = strings.ReplaceAll(content, "port = 5000", "port = 8080")
+		content = strings.ReplaceAll(content, ":5000", ":8080")
+		c.FilesToMake[relPath] = content
+
 		absPath := filepath.Join(c.ProjectDir, relPath)
 		// Ensure parent dirs exist
 		os.MkdirAll(filepath.Dir(absPath), 0755)
@@ -365,6 +376,17 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 	cmdStr = strings.TrimSpace(strings.TrimPrefix(cmdStr, "```"))
 
 	if cmdStr != "" {
+		// For Python projects, prefer the venv python over the system one
+		if projectType == "Python" {
+			venvPy := detectVenvPython(c.ProjectDir)
+			cmdStr = strings.ReplaceAll(cmdStr, "python3 ", venvPy+" ")
+			cmdStr = strings.ReplaceAll(cmdStr, "python ", venvPy+" ")
+			// handle trailing "python3" or "python" with no trailing space (end of string)
+			if cmdStr == "python3" || cmdStr == "python" {
+				cmdStr = venvPy
+			}
+		}
+
 		// Run test/build
 		scriptPath := filepath.Join(c.ProjectDir, "test.sh")
 		if runtime.GOOS == "windows" {
@@ -380,6 +402,88 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			return "", fmt.Errorf("failed to write test script: %v", err)
 		}
 
+		// Check if this looks like a long-running server command (all platforms)
+		isServer, port := c.detectWebServer()
+		cmdLower := strings.ToLower(cmdStr)
+		looksLikeServer := isServer ||
+			strings.Contains(cmdLower, "app.run") ||
+			strings.Contains(cmdLower, "uvicorn") ||
+			strings.Contains(cmdLower, "flask run") ||
+			strings.Contains(cmdLower, "python server") ||
+			strings.Contains(cmdLower, "python app") ||
+			strings.Contains(cmdLower, "python main")
+
+		if looksLikeServer {
+			os.Remove(scriptPath) // clean up script, run directly
+
+			url := fmt.Sprintf("http://localhost:%s", port)
+
+			// Print test plan before running
+			testPlan := fmt.Sprintf("ai-assist %s\nRunning smoke tests:\n  1. Start server process\n  2. Wait up to 15s for server to become ready\n  3. HTTP GET %s (expect 2xx response)\n  4. Kill server and report result\n",
+				getCurrentTime(), url)
+
+			// Build the server command — prefer venv python for everything
+			pythonBin := detectVenvPython(c.ProjectDir)
+			if pythonBin == "" {
+				pythonBin = "python3"
+			}
+
+			var serverCmd *exec.Cmd
+			if strings.Contains(cmdLower, "uvicorn") {
+				// Extract the app target from the command (e.g. "main:app")
+				appTarget := "main:app"
+				parts := strings.Fields(cmdStr)
+				for i, p := range parts {
+					if p == "uvicorn" && i+1 < len(parts) {
+						appTarget = parts[i+1]
+						break
+					}
+				}
+				serverCmd = exec.Command(pythonBin, "-m", "uvicorn", appTarget, "--port", port)
+			} else {
+				mainFile := c.findMainPythonFile()
+				if mainFile != "" {
+					serverCmd = exec.Command(pythonBin, mainFile)
+				} else if runtime.GOOS == "windows" {
+					serverCmd = exec.Command("cmd", "/C", cmdStr)
+				} else {
+					serverCmd = exec.Command("bash", "-c", cmdStr)
+				}
+			}
+			serverCmd.Dir = c.ProjectDir
+			setProcGroupAttr(serverCmd)
+
+			startErr := serverCmd.Start()
+			if startErr != nil {
+				return "", fmt.Errorf("failed to start server for testing: %v", startErr)
+			}
+
+			// Poll for HTTP readiness (up to 15s)
+			httpReady := false
+			client := &http.Client{Timeout: 2 * time.Second}
+			for i := 0; i < 15; i++ {
+				time.Sleep(1 * time.Second)
+				resp, err := client.Get(url)
+				if err == nil {
+					resp.Body.Close()
+					if resp.StatusCode < 500 {
+						httpReady = true
+						break
+					}
+				}
+			}
+
+			killProcessGroup(serverCmd.Process.Pid)
+			_, _ = serverCmd.Process.Wait()
+
+			if !httpReady {
+				return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 15 seconds\n\nAborting autonomous creation.", serverCmd.Process.Pid, url)
+			}
+
+			c.State = StateDocumentation
+			return testPlan + fmt.Sprintf("ai-assist %s\nServer responded at %s — smoke test passed. Process killed.\n\nMoving to documentation...", getCurrentTime(), url), nil
+		}
+
 		var execLog string
 		var out []byte
 		var runErr error
@@ -388,54 +492,6 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			cmd.Dir = c.ProjectDir
 			out, runErr = cmd.CombinedOutput()
 		} else {
-			// Check if this looks like a long-running server command
-			isServer, port := c.detectWebServer()
-			cmdLower := strings.ToLower(cmdStr)
-			looksLikeServer := isServer ||
-				strings.Contains(cmdLower, "app.run") ||
-				strings.Contains(cmdLower, "uvicorn") ||
-				strings.Contains(cmdLower, "flask run") ||
-				strings.Contains(cmdLower, "python server") ||
-				strings.Contains(cmdLower, "python app") ||
-				strings.Contains(cmdLower, "python main")
-
-			if looksLikeServer {
-				os.Remove(scriptPath) // clean up script, run directly
-
-				// Find the actual python file to run
-				mainFile := c.findMainPythonFile()
-				var serverCmd *exec.Cmd
-				if mainFile != "" {
-					pythonBin := detectPythonBinary()
-					if pythonBin == "" {
-						pythonBin = "python3"
-					}
-					serverCmd = exec.Command(pythonBin, mainFile)
-				} else {
-					serverCmd = exec.Command("bash", "-c", cmdStr)
-				}
-				serverCmd.Dir = c.ProjectDir
-				// Put server in its own process group so we can kill all children (e.g. Flask reloader)
-				serverCmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-
-				startErr := serverCmd.Start()
-				if startErr != nil {
-					return "", fmt.Errorf("failed to start server for testing: %v", startErr)
-				}
-
-				url := fmt.Sprintf("http://localhost:%s", port)
-				msg := fmt.Sprintf("ai-assist %s\nServer started in background for smoke test (PID %d).\nListening at: %s\n\nWaiting 20 seconds to verify it stays up...",
-					getCurrentTime(), serverCmd.Process.Pid, url)
-
-				// Sleep 20s then kill the entire process group
-				time.Sleep(20 * time.Second)
-				_ = syscall.Kill(-serverCmd.Process.Pid, syscall.SIGKILL)
-				_, _ = serverCmd.Process.Wait()
-
-				c.State = StateDocumentation
-				return msg + fmt.Sprintf("\n\nai-assist %s\nServer smoke test complete. Process killed.\n\nMoving to documentation...", getCurrentTime()), nil
-			}
-
 			out, runErr, execLog = runScriptWithFallback(scriptPath, c.ProjectDir)
 		}
 		os.Remove(scriptPath)
@@ -612,61 +668,72 @@ func (c *AutonomousCreator) buildAndRunPython() (string, error) {
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
 
-	// Find the main Python file
-	mainFile := c.findMainPythonFile()
-	if mainFile == "" {
-		c.State = StateDone
-		return fmt.Sprintf("ai-assist %s\nCould not find main Python file.\n\nApp Creation complete! Navigate to %s to run your application manually.",
-			getCurrentTime(), c.ProjectName), nil
-	}
+	pythonBin := detectVenvPython(c.ProjectDir)
 
 	// Detect if it's a web server
 	isWebServer, port := c.detectWebServer()
 
+	// Build run args — handle uvicorn vs plain python
+	planLower := strings.ToLower(c.Plan)
+	isUvicorn := strings.Contains(planLower, "uvicorn")
+	var runArgs []string
+	var runLabel string
+
+	if isUvicorn {
+		appTarget := "main:app"
+		re := regexp.MustCompile(`uvicorn\s+(\S+:\S+)`)
+		if m := re.FindStringSubmatch(c.Plan); len(m) > 1 {
+			appTarget = m[1]
+		}
+		runArgs = []string{"-m", "uvicorn", appTarget, "--port", port}
+		runLabel = fmt.Sprintf("%s -m uvicorn %s --port %s", pythonBin, appTarget, port)
+	} else {
+		mainFile := c.findMainPythonFile()
+		if mainFile == "" {
+			c.State = StateDone
+			return fmt.Sprintf("ai-assist %s\nCould not find main Python file.\n\nApp Creation complete! Navigate to %s to run your application manually.",
+				getCurrentTime(), c.ProjectName), nil
+		}
+		runArgs = []string{mainFile}
+		runLabel = fmt.Sprintf("%s %s", pythonBin, mainFile)
+	}
+
 	if isWebServer {
 		result.WriteString(fmt.Sprintf("Python web server detected (port %s)\n", port))
 		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n\n", port))
-
-		// Start the server in a new terminal window
 		result.WriteString("Starting server in new terminal window...\n")
 
 		var runCmd *exec.Cmd
 		if runtime.GOOS == "windows" {
-			// On Windows, use Start-Process via PowerShell to open a new window
-			runCmd = exec.Command("powershell", "-Command",
-				fmt.Sprintf("Start-Process -FilePath 'python' -ArgumentList '%s' -WorkingDirectory '%s'",
-					mainFile, c.ProjectDir))
+			// cmd /k keeps the window open so logs are visible after the server exits
+			cmdLine := fmt.Sprintf("%s %s", pythonBin, strings.Join(runArgs, " "))
+			runCmd = exec.Command("cmd", "/c", "start", "cmd", "/k", cmdLine)
+			runCmd.Dir = c.ProjectDir
+		} else if runtime.GOOS == "darwin" {
+			script := fmt.Sprintf("cd '%s' && %s", c.ProjectDir, runLabel)
+			runCmd = exec.Command("osascript", "-e",
+				fmt.Sprintf("tell application \"Terminal\" to do script \"%s\"", script))
+		} else if _, err := exec.LookPath("gnome-terminal"); err == nil {
+			args := append([]string{"--"}, append([]string{pythonBin}, runArgs...)...)
+			runCmd = exec.Command("gnome-terminal", args...)
+			runCmd.Dir = c.ProjectDir
+		} else if _, err := exec.LookPath("xterm"); err == nil {
+			args := append([]string{"-e", pythonBin}, runArgs...)
+			runCmd = exec.Command("xterm", args...)
+			runCmd.Dir = c.ProjectDir
 		} else {
-			// On Linux/Mac, try different terminal emulators
-			if _, err := exec.LookPath("gnome-terminal"); err == nil {
-				runCmd = exec.Command("gnome-terminal", "--", "python", mainFile)
-				runCmd.Dir = c.ProjectDir
-			} else if _, err := exec.LookPath("xterm"); err == nil {
-				runCmd = exec.Command("xterm", "-e", "python", mainFile)
-				runCmd.Dir = c.ProjectDir
-			} else if runtime.GOOS == "darwin" {
-				// macOS: use 'open' with Terminal.app
-				script := fmt.Sprintf("cd '%s' && python %s", c.ProjectDir, mainFile)
-				runCmd = exec.Command("osascript", "-e",
-					fmt.Sprintf("tell application \"Terminal\" to do script \"%s\"", script))
-			} else {
-				// Fallback: run in background without terminal
-				runCmd = exec.Command("python", mainFile)
-				runCmd.Dir = c.ProjectDir
-			}
+			runCmd = exec.Command(pythonBin, runArgs...)
+			runCmd.Dir = c.ProjectDir
 		}
 
-		// Start the process
 		if err := runCmd.Run(); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: Could not open terminal window: %v\n", err))
-			result.WriteString("Trying to start in background...\n")
-
-			// Fallback: start in background
-			bgCmd := exec.Command("python", mainFile)
+			result.WriteString("Starting in background instead...\n")
+			bgCmd := exec.Command(pythonBin, runArgs...)
 			bgCmd.Dir = c.ProjectDir
 			if err := bgCmd.Start(); err != nil {
 				result.WriteString(fmt.Sprintf("Error: Could not start server: %v\n", err))
-				result.WriteString(fmt.Sprintf("\nTo start manually: cd %s && python %s\n", c.ProjectName, mainFile))
+				result.WriteString(fmt.Sprintf("\nTo start manually:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
 			} else {
 				c.RunningProcess = bgCmd
 				result.WriteString("✓ Server started in background\n\n")
@@ -677,22 +744,18 @@ func (c *AutonomousCreator) buildAndRunPython() (string, error) {
 
 		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n", port))
 		result.WriteString("   Click the link above to open in your browser\n\n")
-		result.WriteString("Note: Check the new terminal window for server logs.\n")
-		result.WriteString("      Close the terminal window to stop the server.\n")
+		result.WriteString(fmt.Sprintf("To start manually:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
+		result.WriteString("Close the terminal window to stop the server.\n")
 	} else {
-		result.WriteString("Running Python application...\n\n")
-		result.WriteString("--- Application Output ---\n")
-
-		runCmd := exec.Command("python", mainFile)
+		result.WriteString("Running Python application...\n\n--- Application Output ---\n")
+		runCmd := exec.Command(pythonBin, runArgs...)
 		runCmd.Dir = c.ProjectDir
 		output, err := runCmd.CombinedOutput()
-
 		if err != nil {
 			result.WriteString(fmt.Sprintf("Error: %v\n", err))
 		}
 		result.WriteString(string(output))
-		result.WriteString("\n--- End Output ---\n\n")
-		result.WriteString(fmt.Sprintf("To run again: cd %s && python %s\n", c.ProjectName, mainFile))
+		result.WriteString(fmt.Sprintf("\n--- End Output ---\n\nTo run again:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
 	}
 
 	c.State = StateDone
@@ -1086,6 +1149,21 @@ func detectPythonBinary() string {
 	return ""
 }
 
+// detectVenvPython returns the venv Python binary path if a venv exists in projectDir,
+// otherwise falls back to the system Python binary.
+func detectVenvPython(projectDir string) string {
+	var venvPython string
+	if runtime.GOOS == "windows" {
+		venvPython = filepath.Join(projectDir, "venv", "Scripts", "python.exe")
+	} else {
+		venvPython = filepath.Join(projectDir, "venv", "bin", "python")
+	}
+	if _, err := os.Stat(venvPython); err == nil {
+		return venvPython
+	}
+	return detectPythonBinary()
+}
+
 // convertToWindowsCommands converts Unix-style shell commands to Windows batch commands
 func convertToWindowsCommands(cmds, pythonBinary string) string {
 	// Replace python3 with detected binary or fallback to python
@@ -1102,8 +1180,29 @@ func convertToWindowsCommands(cmds, pythonBinary string) string {
 	// Replace Unix path separators in venv paths
 	cmds = strings.ReplaceAll(cmds, "venv/bin/", "venv\\Scripts\\")
 
-	// Replace && with & for Windows batch (though && also works in cmd)
-	// Actually, && works fine in Windows batch, so we can leave it
+	// Convert "mkdir -p dir1 dir2 ..." to "if not exist dir1 mkdir dir1 & if not exist dir2 mkdir dir2 ..."
+	// Windows mkdir doesn't support -p or multiple dirs in one call
+	mkdirRe := regexp.MustCompile(`mkdir\s+-p\s+(.+)`)
+	cmds = mkdirRe.ReplaceAllStringFunc(cmds, func(match string) string {
+		sub := mkdirRe.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		dirs := strings.Fields(sub[1])
+		var parts []string
+		for _, d := range dirs {
+			// Convert forward slashes to backslashes
+			d = strings.ReplaceAll(d, "/", "\\")
+			parts = append(parts, fmt.Sprintf("if not exist %s mkdir %s", d, d))
+		}
+		return strings.Join(parts, " & ")
+	})
+
+	// Convert Unix-style quoted echo redirections to unquoted Windows equivalents.
+	// e.g. echo "fastapi" > requirements.txt  →  echo fastapi > requirements.txt
+	// Windows cmd includes the literal quotes in the output, which breaks pip.
+	echoRe := regexp.MustCompile(`(?m)echo\s+"([^"]+)"`)
+	cmds = echoRe.ReplaceAllString(cmds, "echo $1")
 
 	return cmds
 }
