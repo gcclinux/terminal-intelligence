@@ -25,6 +25,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/user/terminal-intelligence/internal/agentic"
 	"github.com/user/terminal-intelligence/internal/ai"
 	"github.com/user/terminal-intelligence/internal/bedrock"
@@ -1677,6 +1678,38 @@ func (a *App) renderEditorTitleBar() string {
 //
 // Returns:
 //   - string: Rendered UI as a string
+
+// truncateToWidth ensures no line in the given string exceeds the specified width.
+// Uses ANSI-aware truncation to correctly handle styled terminal output.
+func truncateToWidth(content string, maxWidth int) string {
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if lipgloss.Width(line) > maxWidth {
+			lines[i] = ansi.Truncate(line, maxWidth, "")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// enforceWidth ensures every line in content is exactly maxWidth visual columns wide.
+// Lines shorter than maxWidth are padded with spaces; longer lines are truncated.
+// This makes panels truly independent — JoinHorizontal will produce exact results.
+func enforceWidth(content string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		w := lipgloss.Width(line)
+		if w > maxWidth {
+			lines[i] = ansi.Truncate(line, maxWidth, "")
+		} else if w < maxWidth {
+			lines[i] = line + strings.Repeat(" ", maxWidth-w)
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (a *App) View() string {
 	if !a.ready {
 		return "Initializing..."
@@ -2042,6 +2075,12 @@ func (a *App) View() string {
 	editorContent := a.editorPane.View()
 	aiContent := a.aiPane.View()
 
+	// Enforce strict per-panel width by truncating each line to its allocated width.
+	// This prevents either panel from overflowing into the other when joined.
+	// Editor renders at editorPane.width - 2 (border takes 2), AI renders at aiPane.width.
+	editorContent = enforceWidth(editorContent, a.editorPane.width-2)
+	aiContent = enforceWidth(aiContent, a.aiPane.width)
+
 	// Create status bar
 	statusStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color("15")).
@@ -2071,7 +2110,6 @@ func (a *App) View() string {
 	// Render full-width editor title bar
 	editorTitleBar := a.renderEditorTitleBar()
 
-	// Join panes side by side
 	mainView := lipgloss.JoinHorizontal(lipgloss.Top, editorContent, aiContent)
 
 	// Combine all sections vertically
@@ -2696,14 +2734,15 @@ func (a *App) loadChatHistory(content string) error {
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
 
-		// Check if this is a role line (starts with "user " or "assistant ")
-		if strings.HasPrefix(line, "user ") || strings.HasPrefix(line, "assistant ") {
+		// Check if this is a role line (starts with "user ", "assistant ", or "notification ")
+		if strings.HasPrefix(line, "user ") || strings.HasPrefix(line, "assistant ") || strings.HasPrefix(line, "notification ") {
 			// Save previous message if exists
 			if currentRole != "" && currentContent.Len() > 0 {
 				msg := types.ChatMessage{
-					Role:      currentRole,
-					Content:   strings.TrimSpace(currentContent.String()),
-					Timestamp: currentTimestamp,
+					Role:           currentRole,
+					Content:        strings.TrimSpace(currentContent.String()),
+					Timestamp:      currentTimestamp,
+					IsNotification: currentRole == "notification",
 				}
 				a.aiPane.messages = append(a.aiPane.messages, msg)
 			}
@@ -2742,9 +2781,10 @@ func (a *App) loadChatHistory(content string) error {
 	// Save last message if exists
 	if currentRole != "" && currentContent.Len() > 0 {
 		msg := types.ChatMessage{
-			Role:      currentRole,
-			Content:   strings.TrimSpace(currentContent.String()),
-			Timestamp: currentTimestamp,
+			Role:           currentRole,
+			Content:        strings.TrimSpace(currentContent.String()),
+			Timestamp:      currentTimestamp,
+			IsNotification: currentRole == "notification",
 		}
 		a.aiPane.messages = append(a.aiPane.messages, msg)
 	}

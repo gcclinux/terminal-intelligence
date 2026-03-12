@@ -15,6 +15,7 @@ import (
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/user/terminal-intelligence/internal/ai"
 	"github.com/user/terminal-intelligence/internal/dirtracker"
 	"github.com/user/terminal-intelligence/internal/docgen"
@@ -1802,7 +1803,13 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Content width must match renderMessage() — see comment there for derivation
+	// Border uses Width(a.width - 4), which with border(2) + padding(2) leaves a.width - 8 for content
+	// We need: content + space + scrollbar = a.width - 8
+	// So: content = a.width - 8 - 2 = a.width - 10
 	contentWidth := a.width - 10
+	if contentWidth < 10 {
+		contentWidth = 10
+	}
 
 	// Apply scrollbar to existing lines and fill empty lines
 	finalLines := make([]string, 0, visibleLines)
@@ -1823,14 +1830,9 @@ func (a *AIChatPane) View() string {
 			lineWidth := lipgloss.Width(line)
 
 			// CRITICAL: Truncate line if it exceeds contentWidth
+			// Use lipgloss.Truncate to preserve ANSI styling
 			if lineWidth > contentWidth {
-				// We use wrapTextFast to get strictly bounded slices visually
-				// Usually this won't be hit because renderMessage already wraps,
-				// but as a fallback it prevents layout crashes.
-				wrapped := wrapTextFast(line, contentWidth)
-				if len(wrapped) > 0 {
-					line = wrapped[0]
-				}
+				line = truncate(line, contentWidth)
 				lineWidth = lipgloss.Width(line)
 			}
 
@@ -1839,9 +1841,11 @@ func (a *AIChatPane) View() string {
 				paddingNeed = 0
 			}
 
+			// Construct line: content + padding + space + scrollbar
+			// Total width: contentWidth + 1 + 1 = contentWidth + 2
 			finalLines = append(finalLines, line+strings.Repeat(" ", paddingNeed)+" "+scrollChar)
 		} else {
-			// Empty line
+			// Empty line: padding + space + scrollbar
 			finalLines = append(finalLines, strings.Repeat(" ", contentWidth)+" "+scrollChar)
 		}
 	}
@@ -2064,6 +2068,9 @@ func (a *AIChatPane) renderViewMode() string {
 	totalLines := len(displayLinesSource)
 
 	// Truncate content width to prevent wrapping (account for scrollbar + border + padding)
+	// Border uses Width(a.width - 4), which with border(2) + padding(2) leaves a.width - 8 for content
+	// We need: content + space + scrollbar = a.width - 8
+	// So: content = a.width - 8 - 2 = a.width - 10
 	contentWidth := a.width - 10
 	if contentWidth < 10 {
 		contentWidth = 10
@@ -2131,16 +2138,9 @@ func (a *AIChatPane) renderViewMode() string {
 				runes = []rune(line)
 			}
 
-			// Try to truncate accurately based on visual width
+			// Truncate accurately based on visual width using truncate helper
 			if lipgloss.Width(line) > contentWidth {
-				cutAt := contentWidth
-				if cutAt > len(runes) {
-					cutAt = len(runes)
-				}
-				for cutAt > 0 && lipgloss.Width(string(runes[:cutAt])) > contentWidth {
-					cutAt--
-				}
-				line = string(runes[:cutAt])
+				line = truncate(line, contentWidth)
 			}
 		}
 
@@ -2161,6 +2161,8 @@ func (a *AIChatPane) renderViewMode() string {
 			}
 		}
 
+		// Construct line: content + padding + space + scrollbar
+		// Total width: contentWidth + 1 + 1 = contentWidth + 2
 		displayLines = append(displayLines, line+strings.Repeat(" ", paddingNeed)+" "+scrollChar)
 	}
 
@@ -2453,6 +2455,18 @@ func (a *AIChatPane) renderConfigMode() string {
 		Render(result)
 }
 
+// truncate truncates a string (potentially with ANSI styling) to a maximum visual width.
+// Uses the charmbracelet/x/ansi package for correct ANSI-aware truncation.
+func truncate(s string, maxWidth int) string {
+	if maxWidth < 1 {
+		return ""
+	}
+	if lipgloss.Width(s) <= maxWidth {
+		return s
+	}
+	return ansi.Truncate(s, maxWidth, "")
+}
+
 // wrapText wraps text to fit within the specified width.
 // Returns a slice of lines, each fitting within the width.
 func wrapText(text string, width int) []string {
@@ -2501,29 +2515,31 @@ func wrapTextFast(text string, width int) []string {
 		width = 1
 	}
 
-	runes := []rune(text)
-
-	// Quick path block: Check string width vs byte length
-	if len(runes) <= width {
-		// Verify there are no exceptionally wide characters hiding
-		if lipgloss.Width(text) <= width {
-			return []string{text}
-		}
+	// Check if text fits without wrapping
+	if lipgloss.Width(text) <= width {
+		return []string{text}
 	}
 
+	runes := []rune(text)
 	var lines []string
 	var currentLine []rune
 	currentWidth := 0
 
 	for _, r := range runes {
 		w := lipgloss.Width(string(r))
+		if w == 0 {
+			// Zero-width character (like combining marks), add it anyway
+			currentLine = append(currentLine, r)
+			continue
+		}
+
 		if currentWidth+w > width {
 			if len(currentLine) > 0 {
 				lines = append(lines, string(currentLine))
 				currentLine = []rune{r}
 				currentWidth = w
 			} else {
-				// Single rune alone exceeds width
+				// Single rune alone exceeds width, add it anyway to avoid infinite loop
 				lines = append(lines, string(r))
 				currentWidth = 0
 			}
@@ -2538,7 +2554,7 @@ func wrapTextFast(text string, width int) []string {
 	}
 
 	if len(lines) == 0 {
-		return []string{""}
+		lines = []string{""}
 	}
 
 	return lines
