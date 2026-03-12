@@ -61,6 +61,7 @@ func (a *App) renderHelpDialog() string {
 
 	// Agent Commands section
 	leftColumn += sectionStyle.Render("── Agent Commands ────────────────────────────") + "\n"
+	leftColumn += keyStyle.Render("  /create <desc>") + descStyle.Render("     Create new app from description") + "\n"
 	leftColumn += keyStyle.Render("  /fix") + descStyle.Render("               Force agentic mode (AI modifies code)") + "\n"
 	leftColumn += keyStyle.Render("  /ask") + descStyle.Render("               Force conversational mode (no changes)") + "\n"
 	leftColumn += keyStyle.Render("  /preview") + descStyle.Render("           Preview changes without applying") + "\n"
