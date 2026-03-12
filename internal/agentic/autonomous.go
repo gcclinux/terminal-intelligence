@@ -216,8 +216,12 @@ Assume we are already inside the project directory.`, c.Plan, pythonExample)
 		}
 
 		scriptContent := cmdsStr
-		if runtime.GOOS != "windows" && !strings.HasPrefix(cmdsStr, "#!") {
-			scriptContent = "#!/bin/bash\n" + cmdsStr
+		if runtime.GOOS != "windows" {
+			if !strings.HasPrefix(cmdsStr, "#!") {
+				scriptContent = "#!/bin/bash\n" + cmdsStr
+			}
+			// Inject pip bootstrap so the script installs pip when missing
+			scriptContent = injectPipBootstrap(scriptContent)
 		}
 		err = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
 		if err != nil {
@@ -494,15 +498,15 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			var progressLog strings.Builder
 			progressLog.WriteString(testPlan)
 			progressLog.WriteString(fmt.Sprintf("ai-assist %s\nServer started (PID %d). Waiting for HTTP response...\n", getCurrentTime(), serverCmd.Process.Pid))
-			
+
 			for i := 0; i < 30; i++ {
 				time.Sleep(1 * time.Second)
-				
+
 				// Log progress every 5 seconds
 				if i > 0 && i%5 == 0 {
 					progressLog.WriteString(fmt.Sprintf("ai-assist %s\nStill waiting... (%d seconds elapsed)\n", getCurrentTime(), i))
 				}
-				
+
 				resp, err := client.Get(url)
 				if err == nil {
 					resp.Body.Close()
@@ -519,23 +523,23 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			if !httpReady {
 				var errorReport strings.Builder
 				errorReport.WriteString(fmt.Sprintf("server started (PID %d) but did not respond at %s within 30 seconds\n\n", serverCmd.Process.Pid, url))
-				
+
 				// Include both stdout and stderr
 				stdoutOutput := strings.TrimSpace(stdoutBuf.String())
 				stderrOutput := strings.TrimSpace(stderrBuf.String())
-				
+
 				if stdoutOutput != "" {
 					errorReport.WriteString("Server stdout:\n")
 					errorReport.WriteString(stdoutOutput)
 					errorReport.WriteString("\n\n")
 				}
-				
+
 				if stderrOutput != "" {
 					errorReport.WriteString("Server stderr:\n")
 					errorReport.WriteString(stderrOutput)
 					errorReport.WriteString("\n\n")
 				}
-				
+
 				if stdoutOutput == "" && stderrOutput == "" {
 					errorReport.WriteString("No output captured from server process.\n")
 					errorReport.WriteString("This may indicate:\n")
@@ -544,7 +548,7 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 					errorReport.WriteString("  - Port conflict or permission issue\n\n")
 					errorReport.WriteString(fmt.Sprintf("Try manually:\n  cd %s\n  %s %s\n\n", c.ProjectName, pythonBin, strings.Join(runArgs, " ")))
 				}
-				
+
 				errorReport.WriteString("Aborting autonomous creation.")
 				return progressLog.String(), fmt.Errorf("%s", errorReport.String())
 			}
@@ -1242,6 +1246,58 @@ func detectVenvPython(projectDir string) string {
 		return venvPython
 	}
 	return detectPythonBinary()
+}
+
+// injectPipBootstrap prepends a pip-detection and installation preamble to a
+// shell script for Linux and macOS. If pip/pip3 is not found it attempts to
+// install it using the platform package manager (apt, dnf/yum, brew) before
+// the rest of the script runs. It also sets a _PIP variable that callers can
+// use, and aliases bare "pip" to the detected binary.
+func injectPipBootstrap(script string) string {
+	preamble := `# --- pip bootstrap (injected by ti) ---
+_PIP=""
+if command -v pip3 >/dev/null 2>&1; then
+    _PIP="pip3"
+elif command -v pip >/dev/null 2>&1; then
+    _PIP="pip"
+else
+    echo "pip not found – attempting to install..."
+    if command -v apt-get >/dev/null 2>&1; then
+        sudo apt-get update -qq && sudo apt-get install -y python3-pip
+    elif command -v dnf >/dev/null 2>&1; then
+        sudo dnf install -y python3-pip
+    elif command -v yum >/dev/null 2>&1; then
+        sudo yum install -y python3-pip
+    elif command -v brew >/dev/null 2>&1; then
+        brew install python
+    else
+        echo "ERROR: cannot install pip – no supported package manager found (apt, dnf, yum, brew)" >&2
+        exit 1
+    fi
+    if command -v pip3 >/dev/null 2>&1; then
+        _PIP="pip3"
+    elif command -v pip >/dev/null 2>&1; then
+        _PIP="pip"
+    else
+        echo "ERROR: pip installation failed" >&2
+        exit 1
+    fi
+fi
+shopt -s expand_aliases 2>/dev/null || true
+alias pip="$_PIP"
+# --- end pip bootstrap ---
+`
+	// Preserve existing shebang at the top
+	shebang := ""
+	rest := script
+	if strings.HasPrefix(script, "#!") {
+		idx := strings.Index(script, "\n")
+		if idx != -1 {
+			shebang = script[:idx+1]
+			rest = script[idx+1:]
+		}
+	}
+	return shebang + preamble + rest
 }
 
 // convertToWindowsCommands converts Unix-style shell commands to Windows batch commands
