@@ -22,8 +22,8 @@ const (
 	StatePlanning CreatorState = iota
 	StateWaitingApproval
 	StateSetup
-	StateDependencies
 	StateFileCreation
+	StateDependencies
 	StateTesting
 	StateDocumentation
 	StateBuildAndRun
@@ -72,10 +72,10 @@ func (c *AutonomousCreator) Step() (string, error) {
 		return "Waiting for user approval... (Type /proceed or yes)", nil
 	case StateSetup:
 		return c.doSetup()
-	case StateDependencies:
-		return c.doDependencies()
 	case StateFileCreation:
 		return c.doFileCreation()
+	case StateDependencies:
+		return c.doDependencies()
 	case StateTesting:
 		return c.doTesting()
 	case StateDocumentation:
@@ -147,14 +147,14 @@ func (c *AutonomousCreator) doSetup() (string, error) {
 
 	var message string
 	if c.ProjectName != originalName {
-		message = fmt.Sprintf("ai-assist %s\nNote: Directory '%s' already exists.\nCreated project folder: %s\n\nMoving to install dependencies...",
+		message = fmt.Sprintf("ai-assist %s\nNote: Directory '%s' already exists.\nCreated project folder: %s\n\nMoving to code generation...",
 			getCurrentTime(), originalName, c.ProjectName)
 	} else {
-		message = fmt.Sprintf("ai-assist %s\nCreated project folder: %s\n\nMoving to install dependencies...",
+		message = fmt.Sprintf("ai-assist %s\nCreated project folder: %s\n\nMoving to code generation...",
 			getCurrentTime(), c.ProjectName)
 	}
 
-	c.State = StateDependencies
+	c.State = StateFileCreation
 	return message, nil
 }
 
@@ -209,31 +209,36 @@ Assume we are already inside the project directory.`, c.Plan, pythonExample)
 			scriptPath = filepath.Join(c.ProjectDir, "setup.bat")
 		}
 
-		err = os.WriteFile(scriptPath, []byte(cmdsStr), 0755)
+		scriptContent := cmdsStr
+		if runtime.GOOS != "windows" && !strings.HasPrefix(cmdsStr, "#!") {
+			scriptContent = "#!/bin/bash\n" + cmdsStr
+		}
+		err = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
 		if err != nil {
 			return "", fmt.Errorf("failed to write setup script: %v", err)
 		}
 
 		// Execute it
-		var cmd *exec.Cmd
+		var execLog string
+		var out []byte
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", "setup.bat")
+			cmd := exec.Command("cmd", "/C", "setup.bat")
+			cmd.Dir = c.ProjectDir
+			out, err = cmd.CombinedOutput()
 		} else {
-			cmd = exec.Command("sh", "setup.sh")
+			out, err, execLog = runScriptWithFallback(scriptPath, c.ProjectDir)
 		}
-		cmd.Dir = c.ProjectDir
-		out, err := cmd.CombinedOutput()
 
 		// Optional cleanup
 		os.Remove(scriptPath)
 
 		if err != nil {
-			return "", fmt.Errorf("dependency setup failed: %v\nOutput:\n%s", err, string(out))
+			return "", fmt.Errorf("%sdependency setup failed: %v\nOutput:\n%s", execLog, err, string(out))
 		}
 	}
 
-	c.State = StateFileCreation
-	return fmt.Sprintf("ai-assist %s\nDependencies installed successfully.\n\nMoving to code generation...", getCurrentTime()), nil
+	c.State = StateTesting
+	return fmt.Sprintf("ai-assist %s\nDependencies installed successfully.\n\nMoving to testing...", getCurrentTime()), nil
 }
 
 func (c *AutonomousCreator) doFileCreation() (string, error) {
@@ -320,8 +325,8 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 		}
 	}
 
-	c.State = StateTesting
-	return fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n\nMoving to testing...", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")), nil
+	c.State = StateDependencies
+	return fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n\nMoving to install dependencies...", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")), nil
 }
 
 func (c *AutonomousCreator) doTesting() (string, error) {
@@ -365,24 +370,76 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			scriptPath = filepath.Join(c.ProjectDir, "test.bat")
 		}
 
-		err = os.WriteFile(scriptPath, []byte(cmdStr), 0755)
+		testScriptContent := cmdStr
+		if runtime.GOOS != "windows" && !strings.HasPrefix(cmdStr, "#!") {
+			testScriptContent = "#!/bin/bash\n" + cmdStr
+		}
+		err = os.WriteFile(scriptPath, []byte(testScriptContent), 0755)
 		if err != nil {
 			return "", fmt.Errorf("failed to write test script: %v", err)
 		}
 
-		var cmd *exec.Cmd
+		var execLog string
+		var out []byte
+		var runErr error
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", "test.bat")
+			cmd := exec.Command("cmd", "/C", "test.bat")
+			cmd.Dir = c.ProjectDir
+			out, runErr = cmd.CombinedOutput()
 		} else {
-			cmd = exec.Command("sh", "test.sh")
+			// Check if this looks like a long-running server command
+			isServer, port := c.detectWebServer()
+			cmdLower := strings.ToLower(cmdStr)
+			looksLikeServer := isServer ||
+				strings.Contains(cmdLower, "app.run") ||
+				strings.Contains(cmdLower, "uvicorn") ||
+				strings.Contains(cmdLower, "flask run") ||
+				strings.Contains(cmdLower, "python server") ||
+				strings.Contains(cmdLower, "python app") ||
+				strings.Contains(cmdLower, "python main")
+
+			if looksLikeServer {
+				os.Remove(scriptPath) // clean up script, run directly
+
+				// Find the actual python file to run
+				mainFile := c.findMainPythonFile()
+				var serverCmd *exec.Cmd
+				if mainFile != "" {
+					pythonBin := detectPythonBinary()
+					if pythonBin == "" {
+						pythonBin = "python3"
+					}
+					serverCmd = exec.Command(pythonBin, mainFile)
+				} else {
+					serverCmd = exec.Command("bash", "-c", cmdStr)
+				}
+				serverCmd.Dir = c.ProjectDir
+
+				startErr := serverCmd.Start()
+				if startErr != nil {
+					return "", fmt.Errorf("failed to start server for testing: %v", startErr)
+				}
+
+				url := fmt.Sprintf("http://localhost:%s", port)
+				msg := fmt.Sprintf("ai-assist %s\nServer started in background for smoke test (PID %d).\nListening at: %s\n\nWaiting 20 seconds to verify it stays up...",
+					getCurrentTime(), serverCmd.Process.Pid, url)
+
+				// Sleep 20s then kill
+				time.Sleep(20 * time.Second)
+				_ = serverCmd.Process.Kill()
+				_, _ = serverCmd.Process.Wait()
+
+				c.State = StateDocumentation
+				return msg + fmt.Sprintf("\n\nai-assist %s\nServer smoke test complete. Process killed.\n\nMoving to documentation...", getCurrentTime()), nil
+			}
+
+			out, runErr, execLog = runScriptWithFallback(scriptPath, c.ProjectDir)
 		}
-		cmd.Dir = c.ProjectDir
-		out, err := cmd.CombinedOutput()
 		os.Remove(scriptPath)
 
-		if err != nil {
-			// Try to fix the error automatically
-			return c.attemptTestFix(projectType, cmdStr, string(out), err)
+		if runErr != nil {
+			// Try to fix the error automatically, passing along the shell attempt log
+			return c.attemptTestFix(projectType, cmdStr, execLog+string(out), runErr)
 		}
 	}
 
@@ -702,6 +759,35 @@ func (c *AutonomousCreator) buildAndRunPowerShell() (string, error) {
 	return result.String(), nil
 }
 
+// runScriptWithFallback runs a shell script, trying bash first then sh as fallback.
+// It returns the combined output, any error, and a log string describing what was attempted.
+func runScriptWithFallback(scriptPath, dir string) ([]byte, error, string) {
+	var log strings.Builder
+
+	// Try bash first
+	log.WriteString(fmt.Sprintf("ai-assist %s\nAttempting to run script with bash...\n", getCurrentTime()))
+	cmdBash := exec.Command("bash", filepath.Base(scriptPath))
+	cmdBash.Dir = dir
+	out, err := cmdBash.CombinedOutput()
+	if err == nil {
+		return out, nil, log.String()
+	}
+
+	log.WriteString(fmt.Sprintf("bash failed: %v\nOutput:\n%s\n\nai-assist %s\nFalling back to sh...\n", err, string(out), getCurrentTime()))
+
+	// Fallback to sh
+	cmdSh := exec.Command("sh", filepath.Base(scriptPath))
+	cmdSh.Dir = dir
+	out, err = cmdSh.CombinedOutput()
+	if err != nil {
+		log.WriteString(fmt.Sprintf("sh also failed: %v\nOutput:\n%s\n", err, string(out)))
+		return out, err, log.String()
+	}
+
+	log.WriteString(fmt.Sprintf("sh succeeded.\n"))
+	return out, nil, log.String()
+}
+
 func aicall(client ai.AIClient, model, prompt string) (string, error) {
 	ch, err := client.Generate(prompt, model, nil)
 	if err != nil {
@@ -944,22 +1030,29 @@ func (c *AutonomousCreator) attemptTestFix(projectType, testCmd, output string, 
 			scriptPath = filepath.Join(c.ProjectDir, "test.bat")
 		}
 
-		err := os.WriteFile(scriptPath, []byte(testCmd), 0755)
+		retryScriptContent := testCmd
+		if runtime.GOOS != "windows" && !strings.HasPrefix(testCmd, "#!") {
+			retryScriptContent = "#!/bin/bash\n" + testCmd
+		}
+		err := os.WriteFile(scriptPath, []byte(retryScriptContent), 0755)
 		if err != nil {
 			return "", fmt.Errorf("failed to write retry test script: %v", err)
 		}
 
-		var cmd *exec.Cmd
+		var retryExecLog string
+		var retryOut []byte
+		var retryErr error
 		if runtime.GOOS == "windows" {
-			cmd = exec.Command("cmd", "/C", "test.bat")
+			cmd := exec.Command("cmd", "/C", "test.bat")
+			cmd.Dir = c.ProjectDir
+			retryOut, retryErr = cmd.CombinedOutput()
 		} else {
-			cmd = exec.Command("sh", "test.sh")
+			retryOut, retryErr, retryExecLog = runScriptWithFallback(scriptPath, c.ProjectDir)
 		}
-		cmd.Dir = c.ProjectDir
-		retryOut, retryErr := cmd.CombinedOutput()
 		os.Remove(scriptPath)
 
 		if retryErr != nil {
+			result.WriteString(retryExecLog)
 			result.WriteString(fmt.Sprintf("Retry failed: %v\n", retryErr))
 			result.WriteString(fmt.Sprintf("Output:\n%s\n\n", string(retryOut)))
 			return "", fmt.Errorf("automated test failed after fix attempt:\n%s", result.String())
