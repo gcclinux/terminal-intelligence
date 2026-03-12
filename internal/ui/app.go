@@ -622,13 +622,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.aiPane.DisplayNotification(status)
 		}
 
-		// Check if there's a file to open (e.g., SUMMARY.md)
-		var openFileCmd tea.Cmd
+		// Check if there's a file to open (e.g., SUMMARY.md) and open it immediately
 		if a.autonomousFileToOpen != "" {
 			filePath := a.autonomousFileToOpen
 			a.autonomousFileToOpen = "" // Clear it after capturing
-			openFileCmd = func() tea.Msg {
-				return OpenFileInEditorMsg{FilePath: filePath}
+			
+			// Open the file directly in the editor pane
+			err := a.editorPane.LoadFile(filePath)
+			if err != nil {
+				a.statusMessage = "Error opening file: " + err.Error()
+			} else {
+				a.statusMessage = "Opened: " + filePath
+				// Switch to editor pane to show the file
+				a.activePane = types.EditorPaneType
+				a.editorPane.focused = true
+				a.aiPane.focused = false
 			}
 		}
 
@@ -639,21 +647,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// yield to the UI event loop momentarily to redraw
 				return AutonomousTickMsg{}
 			}
-
-			// If we have both commands, batch them
-			if openFileCmd != nil {
-				return a, tea.Batch(openFileCmd, tickCmd)
-			}
 			return a, tickCmd
 		}
 
 		if a.autonomousCreator.State == agentic.StateDone {
 			a.autonomousCreator = nil // Process complete, reset
-		}
-
-		// If we have a file to open but no tick, just return the open command
-		if openFileCmd != nil {
-			return a, openFileCmd
 		}
 
 		return a, nil

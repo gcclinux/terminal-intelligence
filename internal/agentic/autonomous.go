@@ -119,6 +119,7 @@ Please provide an implementation plan. Include:
 		c.ProjectName = "ti-autonomous-app"
 	}
 	c.ProjectDir = filepath.Join(c.Workspace, c.ProjectName)
+	c.ProjectDir, _ = filepath.Abs(c.ProjectDir)
 
 	c.State = StateWaitingApproval
 	return fmt.Sprintf("ai-assist %s\nPlan generated:\n\n%s\n\nDo you want to proceed? Type /proceed to continue or /cancel to abort.", getCurrentTime(), plan), nil
@@ -138,6 +139,7 @@ func (c *AutonomousCreator) doSetup() (string, error) {
 		// Directory exists, try with a number suffix
 		c.ProjectName = fmt.Sprintf("%s-%d", originalName, counter)
 		c.ProjectDir = filepath.Join(c.Workspace, c.ProjectName)
+		c.ProjectDir, _ = filepath.Abs(c.ProjectDir)
 		counter++
 
 		// Safety check to avoid infinite loop
@@ -690,8 +692,8 @@ func (c *AutonomousCreator) buildAndRunGo() (string, error) {
 			}
 		}
 
-		// Start the process
-		if err := runCmd.Run(); err != nil {
+		// Start the process (non-blocking)
+		if err := runCmd.Start(); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: Could not open terminal window: %v\n", err))
 			result.WriteString("Trying to start in background...\n")
 
@@ -706,6 +708,7 @@ func (c *AutonomousCreator) buildAndRunGo() (string, error) {
 				result.WriteString("✓ Server started in background\n\n")
 			}
 		} else {
+			c.RunningProcess = runCmd
 			result.WriteString("✓ Server is now running in a new terminal window!\n\n")
 		}
 
@@ -799,7 +802,7 @@ func (c *AutonomousCreator) buildAndRunPython() (string, error) {
 			runCmd.Dir = c.ProjectDir
 		}
 
-		if err := runCmd.Run(); err != nil {
+		if err := runCmd.Start(); err != nil {
 			result.WriteString(fmt.Sprintf("Warning: Could not open terminal window: %v\n", err))
 			result.WriteString("Starting in background instead...\n")
 			bgCmd := exec.Command(pythonBin, runArgs...)
@@ -812,6 +815,7 @@ func (c *AutonomousCreator) buildAndRunPython() (string, error) {
 				result.WriteString("✓ Server started in background\n\n")
 			}
 		} else {
+			c.RunningProcess = runCmd
 			result.WriteString("✓ Server is now running in a new terminal window!\n\n")
 		}
 
