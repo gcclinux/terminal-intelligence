@@ -159,15 +159,34 @@ func (c *AutonomousCreator) doSetup() (string, error) {
 }
 
 func (c *AutonomousCreator) doDependencies() (string, error) {
+	// Detect Python binary if this is a Python project
+	pythonBinary := detectPythonBinary()
+
+	// Build platform-appropriate examples
+	var pythonExample string
+	if runtime.GOOS == "windows" {
+		if pythonBinary != "" {
+			pythonExample = fmt.Sprintf("Example for Python: %s -m venv venv && venv\\Scripts\\activate && pip install fastapi uvicorn", pythonBinary)
+		} else {
+			pythonExample = "Example for Python: python -m venv venv && venv\\Scripts\\activate && pip install fastapi uvicorn"
+		}
+	} else {
+		if pythonBinary != "" {
+			pythonExample = fmt.Sprintf("Example for Python: %s -m venv venv && source venv/bin/activate && pip install fastapi uvicorn", pythonBinary)
+		} else {
+			pythonExample = "Example for Python: python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn"
+		}
+	}
+
 	// Ask AI for the specific setup shell commands required.
 	prompt := fmt.Sprintf(`Given the implementation plan:
 %s
 
 What are the precise terminal commands to initialize the project dependencies?
-Return ONLY a bash script with the commands. No markdown formatting, no explanations. Just the raw commands.
+Return ONLY a script with the commands. No markdown formatting, no explanations. Just the raw commands.
 Example for Go: go mod init my-app && go mod tidy
-Example for Python: python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn
-Assume we are already inside the project directory.`, c.Plan)
+%s
+Assume we are already inside the project directory.`, c.Plan, pythonExample)
 
 	cmdsStr, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
@@ -179,6 +198,11 @@ Assume we are already inside the project directory.`, c.Plan)
 	cmdsStr = strings.TrimSpace(strings.TrimPrefix(cmdsStr, "```"))
 
 	if cmdsStr != "" {
+		// On Windows, convert Unix-style commands to Windows-compatible ones
+		if runtime.GOOS == "windows" {
+			cmdsStr = convertToWindowsCommands(cmdsStr, pythonBinary)
+		}
+
 		// Prepare a shell script to execute
 		scriptPath := filepath.Join(c.ProjectDir, "setup.sh")
 		if runtime.GOOS == "windows" {
@@ -948,4 +972,42 @@ func (c *AutonomousCreator) attemptTestFix(projectType, testCmd, output string, 
 
 	// For other errors, just report and abort
 	return "", fmt.Errorf("automated test failed: %v\nOutput: %s\n\nAborting autonomous creation.", testErr, output)
+}
+
+// detectPythonBinary tries to find the correct Python binary on the system
+// Returns "python" or "python3" depending on what's available, or empty string if neither found
+func detectPythonBinary() string {
+	// Try python first (common on Windows)
+	if _, err := exec.LookPath("python"); err == nil {
+		return "python"
+	}
+
+	// Try python3 (common on Linux/Mac)
+	if _, err := exec.LookPath("python3"); err == nil {
+		return "python3"
+	}
+
+	return ""
+}
+
+// convertToWindowsCommands converts Unix-style shell commands to Windows batch commands
+func convertToWindowsCommands(cmds, pythonBinary string) string {
+	// Replace python3 with detected binary or fallback to python
+	if pythonBinary != "" {
+		cmds = strings.ReplaceAll(cmds, "python3", pythonBinary)
+	} else {
+		cmds = strings.ReplaceAll(cmds, "python3", "python")
+	}
+
+	// Replace Unix venv activation with Windows activation
+	cmds = strings.ReplaceAll(cmds, "source venv/bin/activate", "venv\\Scripts\\activate")
+	cmds = strings.ReplaceAll(cmds, "source venv\\bin\\activate", "venv\\Scripts\\activate")
+
+	// Replace Unix path separators in venv paths
+	cmds = strings.ReplaceAll(cmds, "venv/bin/", "venv\\Scripts\\")
+
+	// Replace && with & for Windows batch (though && also works in cmd)
+	// Actually, && works fine in Windows batch, so we can leave it
+
+	return cmds
 }

@@ -366,3 +366,63 @@ func TestExtractProjectName(t *testing.T) {
 		})
 	}
 }
+
+func TestDetectPythonBinary(t *testing.T) {
+	// This test just verifies the function runs without error
+	// The actual result depends on the system's Python installation
+	binary := detectPythonBinary()
+
+	// Should return either "python", "python3", or empty string
+	if binary != "" && binary != "python" && binary != "python3" {
+		t.Errorf("detectPythonBinary returned unexpected value: %s", binary)
+	}
+}
+
+func TestConvertToWindowsCommands(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		pythonBinary   string
+		expectedOutput string
+	}{
+		{
+			name:           "Replace python3 with detected binary",
+			input:          "python3 -m venv venv && source venv/bin/activate && pip install requests",
+			pythonBinary:   "python",
+			expectedOutput: "python -m venv venv && venv\\Scripts\\activate && pip install requests",
+		},
+		{
+			name:           "Replace python3 with python when no binary detected",
+			input:          "python3 -m venv venv && source venv/bin/activate",
+			pythonBinary:   "",
+			expectedOutput: "python -m venv venv && venv\\Scripts\\activate",
+		},
+		{
+			name:           "Replace Unix venv paths with Windows paths",
+			input:          "source venv/bin/activate && venv/bin/pip install flask",
+			pythonBinary:   "python",
+			expectedOutput: "venv\\Scripts\\activate && venv\\Scripts\\pip install flask",
+		},
+		{
+			name:           "Handle backslash paths",
+			input:          "source venv\\bin\\activate",
+			pythonBinary:   "python",
+			expectedOutput: "venv\\Scripts\\activate",
+		},
+		{
+			name:           "No changes needed for Go commands",
+			input:          "go mod init my-app && go mod tidy",
+			pythonBinary:   "",
+			expectedOutput: "go mod init my-app && go mod tidy",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := convertToWindowsCommands(tt.input, tt.pythonBinary)
+			if result != tt.expectedOutput {
+				t.Errorf("convertToWindowsCommands() = %q, want %q", result, tt.expectedOutput)
+			}
+		})
+	}
+}
