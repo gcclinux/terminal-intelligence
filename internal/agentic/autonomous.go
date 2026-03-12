@@ -2,6 +2,7 @@ package agentic
 
 import (
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -418,6 +419,25 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 
 			url := fmt.Sprintf("http://localhost:%s", port)
 
+			// Check if port is available before attempting to start server
+			portAvailable, portErr := isPortAvailable(port)
+			if !portAvailable {
+				var portErrMsg strings.Builder
+				portErrMsg.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
+				portErrMsg.WriteString(fmt.Sprintf("Port %s is not available for binding.\n", port))
+				if portErr != nil {
+					portErrMsg.WriteString(fmt.Sprintf("Error: %v\n\n", portErr))
+				}
+				portErrMsg.WriteString("This could mean:\n")
+				portErrMsg.WriteString("  - Another process is already using this port\n")
+				portErrMsg.WriteString("  - The port is in TIME_WAIT state from a recent connection\n")
+				portErrMsg.WriteString("  - Firewall or system restrictions are blocking the port\n\n")
+				portErrMsg.WriteString(fmt.Sprintf("To check what's using port %s on macOS:\n", port))
+				portErrMsg.WriteString(fmt.Sprintf("  lsof -i :%s\n\n", port))
+				portErrMsg.WriteString("Aborting autonomous creation.")
+				return "", fmt.Errorf("%s", portErrMsg.String())
+			}
+
 			// Build the server command — prefer venv python for everything
 			pythonBin := detectVenvPython(c.ProjectDir)
 			if pythonBin == "" {
@@ -458,8 +478,9 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			serverCmd.Dir = c.ProjectDir
 			setProcGroupAttr(serverCmd)
 
-			// Capture stderr so we can report it on failure
-			var stderrBuf strings.Builder
+			// Capture both stdout and stderr so we can report them on failure
+			var stdoutBuf, stderrBuf strings.Builder
+			serverCmd.Stdout = &stdoutBuf
 			serverCmd.Stderr = &stderrBuf
 
 			startErr := serverCmd.Start()
@@ -467,11 +488,21 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 				return "", fmt.Errorf("failed to start server for testing: %v", startErr)
 			}
 
-			// Poll for HTTP readiness (up to 30s)
+			// Poll for HTTP readiness (up to 30s) with progress updates
 			httpReady := false
 			client := &http.Client{Timeout: 2 * time.Second}
+			var progressLog strings.Builder
+			progressLog.WriteString(testPlan)
+			progressLog.WriteString(fmt.Sprintf("ai-assist %s\nServer started (PID %d). Waiting for HTTP response...\n", getCurrentTime(), serverCmd.Process.Pid))
+			
 			for i := 0; i < 30; i++ {
 				time.Sleep(1 * time.Second)
+				
+				// Log progress every 5 seconds
+				if i > 0 && i%5 == 0 {
+					progressLog.WriteString(fmt.Sprintf("ai-assist %s\nStill waiting... (%d seconds elapsed)\n", getCurrentTime(), i))
+				}
+				
 				resp, err := client.Get(url)
 				if err == nil {
 					resp.Body.Close()
@@ -486,11 +517,36 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			_, _ = serverCmd.Process.Wait()
 
 			if !httpReady {
-				errOutput := strings.TrimSpace(stderrBuf.String())
-				if errOutput != "" {
-					return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 30 seconds\nServer output:\n%s\n\nAborting autonomous creation.", serverCmd.Process.Pid, url, errOutput)
+				var errorReport strings.Builder
+				errorReport.WriteString(fmt.Sprintf("server started (PID %d) but did not respond at %s within 30 seconds\n\n", serverCmd.Process.Pid, url))
+				
+				// Include both stdout and stderr
+				stdoutOutput := strings.TrimSpace(stdoutBuf.String())
+				stderrOutput := strings.TrimSpace(stderrBuf.String())
+				
+				if stdoutOutput != "" {
+					errorReport.WriteString("Server stdout:\n")
+					errorReport.WriteString(stdoutOutput)
+					errorReport.WriteString("\n\n")
 				}
-				return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 30 seconds\n\nAborting autonomous creation.", serverCmd.Process.Pid, url)
+				
+				if stderrOutput != "" {
+					errorReport.WriteString("Server stderr:\n")
+					errorReport.WriteString(stderrOutput)
+					errorReport.WriteString("\n\n")
+				}
+				
+				if stdoutOutput == "" && stderrOutput == "" {
+					errorReport.WriteString("No output captured from server process.\n")
+					errorReport.WriteString("This may indicate:\n")
+					errorReport.WriteString("  - Server is buffering output\n")
+					errorReport.WriteString("  - Server failed to start silently\n")
+					errorReport.WriteString("  - Port conflict or permission issue\n\n")
+					errorReport.WriteString(fmt.Sprintf("Try manually:\n  cd %s\n  %s %s\n\n", c.ProjectName, pythonBin, strings.Join(runArgs, " ")))
+				}
+				
+				errorReport.WriteString("Aborting autonomous creation.")
+				return progressLog.String(), fmt.Errorf("%s", errorReport.String())
 			}
 
 			c.State = StateDocumentation
@@ -1084,6 +1140,17 @@ func (c *AutonomousCreator) runGoModTidy() error {
 		return fmt.Errorf("go mod tidy failed: %v\nOutput: %s", err, string(output))
 	}
 	return nil
+}
+
+// isPortAvailable checks if a port is available for binding
+func isPortAvailable(port string) (bool, error) {
+	// Try to listen on the port
+	listener, err := net.Listen("tcp", "localhost:"+port)
+	if err != nil {
+		return false, err
+	}
+	listener.Close()
+	return true, nil
 }
 
 // attemptTestFix tries to automatically fix test failures
