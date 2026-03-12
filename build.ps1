@@ -4,7 +4,7 @@ param(
 )
 
 $BINARY_NAME = "ti"
-$VERSION = "0.0.2.7"
+$VERSION = "0.0.2.8"
 $BUILD_DIR = "build"
 
 # Get build number from git
