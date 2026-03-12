@@ -51,11 +51,14 @@ func main() {
 	// 3. Runtime Defaults (Do NOT save these back to the JSON file)
 	// This ensures the app respects the current folder it's opened in
 	// unless the user has explicitly hardcoded a path in their config.
+	workspaceChanged := false
 	if appCfg.WorkspaceDir == "" {
 		if cwd, err := os.Getwd(); err == nil {
 			appCfg.WorkspaceDir = cwd
+			workspaceChanged = true
 		} else {
 			appCfg.WorkspaceDir = "." // Fallback
+			workspaceChanged = true
 		}
 	}
 
@@ -65,7 +68,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 5. Run Application
+	// 5. Save workspace to config if it was set from current directory
+	if workspaceChanged {
+		_ = config.UpdateWorkspace(appCfg.WorkspaceDir)
+	}
+
+	// 6. Run Application
 	app := ui.New(appCfg, buildNumber)
 	p := tea.NewProgram(app, tea.WithAltScreen())
 

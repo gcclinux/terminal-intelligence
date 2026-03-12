@@ -1452,7 +1452,9 @@ func (a *AIChatPane) getMaxScroll() int {
 		visibleLines = 1
 	}
 
-	maxScroll := totalLines - visibleLines
+	// Add a small buffer to ensure the last line is fully visible
+	// This accounts for any rounding or spacing issues
+	maxScroll := totalLines - visibleLines + 1
 	if maxScroll < 0 {
 		maxScroll = 0
 	}

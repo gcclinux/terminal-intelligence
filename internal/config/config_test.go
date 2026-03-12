@@ -869,3 +869,136 @@ func TestProviderPersistence_OllamaStaysOllamaAfterLoad(t *testing.T) {
 		t.Errorf("Provider should persist as ollama, got %q", appCfg.Provider)
 	}
 }
+
+// TestEnsureAllFields_PopulatesEmptyFields verifies that EnsureAllFields
+// sets default values for all empty fields in the config.
+func TestEnsureAllFields_PopulatesEmptyFields(t *testing.T) {
+	// Create a config with only some fields set
+	cfg := &JSONConfig{
+		Agent:     "gemini",
+		GeminiAPI: "test-api-key",
+	}
+
+	// Call EnsureAllFields
+	EnsureAllFields(cfg)
+
+	// Verify all fields are now populated
+	if cfg.Agent != "gemini" {
+		t.Errorf("expected Agent to remain 'gemini', got '%s'", cfg.Agent)
+	}
+	if cfg.GeminiAPI != "test-api-key" {
+		t.Errorf("expected GeminiAPI to remain 'test-api-key', got '%s'", cfg.GeminiAPI)
+	}
+	if cfg.OllamaURL != "http://localhost:11434" {
+		t.Errorf("expected OllamaURL to be set to default, got '%s'", cfg.OllamaURL)
+	}
+	if cfg.Autonomous != "false" {
+		t.Errorf("expected Autonomous to be set to 'false', got '%s'", cfg.Autonomous)
+	}
+	if cfg.Workspace == "" {
+		t.Error("expected Workspace to be set to default path")
+	}
+}
+
+// TestEnsureAllFields_EmptyConfig verifies that EnsureAllFields
+// populates a completely empty config with all defaults.
+func TestEnsureAllFields_EmptyConfig(t *testing.T) {
+	cfg := &JSONConfig{}
+
+	EnsureAllFields(cfg)
+
+	// Verify all required fields have defaults
+	if cfg.Agent != "ollama" {
+		t.Errorf("expected Agent to be 'ollama', got '%s'", cfg.Agent)
+	}
+	if cfg.OllamaURL != "http://localhost:11434" {
+		t.Errorf("expected OllamaURL to be set, got '%s'", cfg.OllamaURL)
+	}
+	if cfg.Autonomous != "false" {
+		t.Errorf("expected Autonomous to be 'false', got '%s'", cfg.Autonomous)
+	}
+	if cfg.Workspace == "" {
+		t.Error("expected Workspace to be set to default path")
+	}
+	// Empty string defaults are acceptable for optional fields
+	if cfg.Model != "" {
+		t.Errorf("expected Model to remain empty, got '%s'", cfg.Model)
+	}
+	if cfg.GModel != "" {
+		t.Errorf("expected GModel to remain empty, got '%s'", cfg.GModel)
+	}
+}
+
+// TestUpdateWorkspace_UpdatesExistingConfig verifies that UpdateWorkspace
+// updates the workspace field in an existing config file.
+func TestUpdateWorkspace_UpdatesExistingConfig(t *testing.T) {
+	// Get the actual config path
+	configPath, err := ConfigFilePath()
+	if err != nil {
+		t.Fatalf("Failed to get config path: %v", err)
+	}
+
+	// Backup existing config if it exists
+	var backupData []byte
+	var hadExisting bool
+	if data, err := os.ReadFile(configPath); err == nil {
+		backupData = data
+		hadExisting = true
+	}
+
+	// Ensure cleanup
+	defer func() {
+		if hadExisting {
+			os.WriteFile(configPath, backupData, 0644)
+		} else {
+			os.Remove(configPath)
+		}
+	}()
+
+	// Create initial config
+	initialCfg := &JSONConfig{
+		Agent:      "gemini",
+		GeminiAPI:  "test-api-key",
+		Workspace:  "/old/workspace",
+		Autonomous: "true",
+	}
+
+	// Ensure config directory exists
+	if err := os.MkdirAll(filepath.Dir(configPath), 0755); err != nil {
+		t.Fatalf("Failed to create config directory: %v", err)
+	}
+
+	data, _ := ToJSON(initialCfg)
+	if err := os.WriteFile(configPath, data, 0644); err != nil {
+		t.Fatalf("Failed to write initial config: %v", err)
+	}
+
+	// Call UpdateWorkspace
+	newWorkspace := "/new/workspace/path"
+	err = UpdateWorkspace(newWorkspace)
+	if err != nil {
+		t.Fatalf("UpdateWorkspace failed: %v", err)
+	}
+
+	// Load and verify the config
+	cfg, err := LoadFromFile(configPath)
+	if err != nil {
+		t.Fatalf("Failed to load updated config: %v", err)
+	}
+
+	// Verify workspace was updated
+	if cfg.Workspace != newWorkspace {
+		t.Errorf("Expected workspace '%s', got '%s'", newWorkspace, cfg.Workspace)
+	}
+
+	// Verify other fields were preserved
+	if cfg.Agent != "gemini" {
+		t.Errorf("Expected agent 'gemini', got '%s'", cfg.Agent)
+	}
+	if cfg.GeminiAPI != "test-api-key" {
+		t.Errorf("Expected GeminiAPI 'test-api-key', got '%s'", cfg.GeminiAPI)
+	}
+	if cfg.Autonomous != "true" {
+		t.Errorf("Expected Autonomous 'true', got '%s'", cfg.Autonomous)
+	}
+}

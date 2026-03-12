@@ -29,6 +29,7 @@ type AppConfig struct {
 	EditorTheme   string `yaml:"editor_theme"`
 	WorkspaceDir  string `yaml:"workspace_dir"`
 	AutoSave      bool   `yaml:"auto_save"`
+	Autonomous    bool   `yaml:"autonomous"`
 	TabSize       int    `yaml:"tab_size"`
 }
 
@@ -45,6 +46,7 @@ func DefaultConfig() *AppConfig {
 		EditorTheme:  "monokai",
 		WorkspaceDir: filepath.Join(homeDir, "ti-workspace"),
 		AutoSave:     false,
+		Autonomous:   false,
 		TabSize:      4,
 	}
 }

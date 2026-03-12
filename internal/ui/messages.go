@@ -33,3 +33,9 @@ type ProjectCompleteMsg struct {
 type ProjectFileOpenMsg struct {
 	Paths []string // remaining absolute paths to open; open [0], queue rest
 }
+
+// OpenWorkspacePickerMsg triggers the workspace selection dialog immediately.
+type OpenWorkspacePickerMsg struct{}
+
+// AutonomousTickMsg signals the App to invoke the Step() method on the active AutonomousCreator.
+type AutonomousTickMsg struct{}

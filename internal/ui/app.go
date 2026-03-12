@@ -56,45 +56,47 @@ import (
 //
 // The App implements the Bubble Tea Model interface (Init, Update, View).
 type App struct {
-	config                    *types.AppConfig          // Application configuration
-	editorPane                *EditorPane               // Left pane: code editor
-	aiPane                    *AIChatPane               // Right pane: AI chat
-	gitPane                   *GitPane                  // Git operations popup overlay
-	fileManager               *filemanager.FileManager  // File system operations
-	aiClient                  ai.AIClient               // AI service client (Ollama or Gemini)
-	agenticFixer              *agentic.AgenticCodeFixer // Autonomous code fixing orchestrator
-	projectFixer              *agentic.ProjectFixer     // Project-wide agentic fixer
-	activePane                types.PaneType            // Currently focused pane
-	width                     int                       // Terminal width
-	height                    int                       // Terminal height
-	ready                     bool                      // Whether initial sizing is complete
-	showExitConfirmation      bool                      // Whether exit confirmation dialog is showing
-	showFilePrompt            bool                      // Whether file creation prompt is showing
-	showFilePicker            bool                      // Whether file picker dialog is showing
-	showFolderPicker          bool                      // Whether folder picker dialog is showing
-	showBackupPicker          bool                      // Whether backup picker dialog is showing
-	showChatLoader            bool                      // Whether chat loader dialog is showing
-	showHelp                  bool                      // Whether help dialog is showing
-	showLanguageInstallPrompt bool                      // Whether language install prompt is showing
-	languageToInstall         string                    // Language name for installation prompt
-	fileTypeForInstall        string                    // File type that triggered install check
-	filePromptBuffer          string                    // Buffer for file name input
-	fileList                  []string                  // List of files for picker
-	folderList                []string                  // List of folders for picker
-	backupList                []string                  // List of backups for picker
-	chatList                  []string                  // List of saved chats for loader
-	filePickerIndex           int                       // Selected index in file picker
-	filePickerPath            string                    // Current path being browsed in file picker
-	folderPickerIndex         int                       // Selected index in folder picker
-	folderPickerPath          string                    // Current path being browsed in folder picker
-	forceQuit                 bool                      // Whether to quit without save confirmation
-	statusMessage             string                    // Status bar message
-	pendingCodeInsert         string                    // Code waiting to be inserted after file creation
-	buildNumber               string                    // Build number from git commits
-	searchResults             []string                  // Files found in last search
-	searchResultIndex         int                       // Current index in searchResults
-	searchTerms               []string                  // Last search terms used
-	lastPreviewRequest        string                    // Original /project request from the last preview run
+	config                    *types.AppConfig           // Application configuration
+	editorPane                *EditorPane                // Left pane: code editor
+	aiPane                    *AIChatPane                // Right pane: AI chat
+	gitPane                   *GitPane                   // Git operations popup overlay
+	fileManager               *filemanager.FileManager   // File system operations
+	aiClient                  ai.AIClient                // AI service client (Ollama or Gemini)
+	agenticFixer              *agentic.AgenticCodeFixer  // Autonomous code fixing orchestrator
+	projectFixer              *agentic.ProjectFixer      // Project-wide agentic fixer
+	autonomousCreator         *agentic.AutonomousCreator // Autonomous application builder
+	activePane                types.PaneType             // Currently focused pane
+	width                     int                        // Terminal width
+	height                    int                        // Terminal height
+	ready                     bool                       // Whether initial sizing is complete
+	showExitConfirmation      bool                       // Whether exit confirmation dialog is showing
+	showFilePrompt            bool                       // Whether file creation prompt is showing
+	showFilePicker            bool                       // Whether file picker dialog is showing
+	showFolderPicker          bool                       // Whether folder picker dialog is showing
+	showBackupPicker          bool                       // Whether backup picker dialog is showing
+	showChatLoader            bool                       // Whether chat loader dialog is showing
+	showHelp                  bool                       // Whether help dialog is showing
+	showLanguageInstallPrompt bool                       // Whether language install prompt is showing
+	languageToInstall         string                     // Language name for installation prompt
+	fileTypeForInstall        string                     // File type that triggered install check
+	filePromptBuffer          string                     // Buffer for file name input
+	fileList                  []string                   // List of files for picker
+	folderList                []string                   // List of folders for picker
+	backupList                []string                   // List of backups for picker
+	chatList                  []string                   // List of saved chats for loader
+	filePickerIndex           int                        // Selected index in file picker
+	filePickerPath            string                     // Current path being browsed in file picker
+	folderPickerIndex         int                        // Selected index in folder picker
+	folderPickerPath          string                     // Current path being browsed in folder picker
+	forceQuit                 bool                       // Whether to quit without save confirmation
+	statusMessage             string                     // Status bar message
+	pendingCodeInsert         string                     // Code waiting to be inserted after file creation
+	buildNumber               string                     // Build number from git commits
+	searchResults             []string                   // Files found in last search
+	searchResultIndex         int                        // Current index in searchResults
+	searchTerms               []string                   // Last search terms used
+	lastPreviewRequest        string                     // Original /project request from the last preview run
+	autonomousFileToOpen      string                     // File path to open after autonomous creation step
 }
 
 // New creates a new application instance with the provided configuration.
@@ -175,6 +177,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		editorPane:           NewEditorPane(fm),
 		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider, config.WorkspaceDir),
 		gitPane:              gitPane,
+		autonomousCreator:    nil,
 		activePane:           types.EditorPaneType,
 		ready:                false,
 		showExitConfirmation: false,
@@ -193,6 +196,9 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(
 		a.aiPane.CheckAIAvailability(),
 		tea.EnableBracketedPaste,
+		func() tea.Msg {
+			return OpenWorkspacePickerMsg{}
+		},
 	)
 }
 
@@ -232,6 +238,26 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmds []tea.Cmd
 
 	switch msg := msg.(type) {
+	case OpenWorkspacePickerMsg:
+		startDir := a.config.WorkspaceDir
+		if startDir == "" {
+			home, _ := os.UserHomeDir()
+			startDir = home
+		}
+
+		dirs, err := a.fileManager.ListDirectories(startDir)
+		if err != nil {
+			a.statusMessage = "Error listing directories: " + err.Error()
+			return a, nil
+		}
+
+		a.folderPickerPath = startDir
+		a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
+		a.folderPickerIndex = 0
+		a.showFolderPicker = true
+		a.statusMessage = "Select a folder to set as workspace"
+		return a, nil
+
 	case SaveConfigMsg:
 		// Handle config save
 		configPath, err := config.ConfigFilePath()
@@ -262,6 +288,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				jcfg.BedrockRegion = msg.Values[i]
 			case "workspace":
 				jcfg.Workspace = msg.Values[i]
+			case "autonomous":
+				jcfg.Autonomous = msg.Values[i]
 			}
 		}
 
@@ -529,8 +557,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Update AIChatPane workspace root
 				a.aiPane.SetWorkspaceRoot(msg.NewDir)
 
-				// Notify user of directory change
-				a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir
+				// Save workspace to config file
+				if err := config.UpdateWorkspace(msg.NewDir); err != nil {
+					a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir + " (config update failed: " + err.Error() + ")"
+				} else {
+					a.statusMessage = "Cloned successfully. Changed directory to: " + msg.NewDir
+				}
 
 				// Close the Git UI after successful clone
 				a.gitPane.Toggle()
@@ -570,6 +602,58 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Update GitPane size for proper centering
 		a.gitPane.width = msg.Width
 		a.gitPane.height = msg.Height
+
+		return a, nil
+
+	case AutonomousTickMsg:
+		if a.autonomousCreator == nil {
+			return a, nil
+		}
+
+		status, err := a.autonomousCreator.Step()
+		if err != nil {
+			a.aiPane.DisplayNotification("Autonomous Creation Error: " + err.Error())
+			a.autonomousCreator = nil // Reset state on error
+			return a, nil
+		}
+
+		if status != "" {
+			a.aiPane.DisplayNotification(status)
+		}
+
+		// Check if there's a file to open (e.g., SUMMARY.md)
+		var openFileCmd tea.Cmd
+		if a.autonomousFileToOpen != "" {
+			filePath := a.autonomousFileToOpen
+			a.autonomousFileToOpen = "" // Clear it after capturing
+			openFileCmd = func() tea.Msg {
+				return OpenFileInEditorMsg{FilePath: filePath}
+			}
+		}
+
+		// If the state is not waiting for user or done, queue the next tick to keep it going.
+		// For waiting states, we pause the loop until the user proceeds.
+		if a.autonomousCreator.State != agentic.StateWaitingApproval && a.autonomousCreator.State != agentic.StateDone {
+			tickCmd := func() tea.Msg {
+				// yield to the UI event loop momentarily to redraw
+				return AutonomousTickMsg{}
+			}
+
+			// If we have both commands, batch them
+			if openFileCmd != nil {
+				return a, tea.Batch(openFileCmd, tickCmd)
+			}
+			return a, tickCmd
+		}
+
+		if a.autonomousCreator.State == agentic.StateDone {
+			a.autonomousCreator = nil // Process complete, reset
+		}
+
+		// If we have a file to open but no tick, just return the open command
+		if openFileCmd != nil {
+			return a, openFileCmd
+		}
 
 		return a, nil
 
@@ -719,7 +803,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							a.gitPane.SetWorkDir(newDir)
 							a.aiPane.SetWorkspaceRoot(newDir)
 							a.editorPane.CloseFile() // Close current file as it's outside new workspace
-							a.statusMessage = "Workspace changed to: " + newDir
+
+							// Save workspace to config file
+							if err := config.UpdateWorkspace(newDir); err != nil {
+								a.statusMessage = "Workspace changed to: " + newDir + " (config update failed: " + err.Error() + ")"
+							} else {
+								a.statusMessage = "Workspace changed to: " + newDir
+							}
 						}
 						a.showFolderPicker = false
 						a.folderList = nil
@@ -1127,25 +1217,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 
 		case "ctrl+w":
-			// Open folder picker
-			startDir := a.config.WorkspaceDir
-			if startDir == "" {
-				home, _ := os.UserHomeDir()
-				startDir = home
+			// Open folder picker via message
+			return a, func() tea.Msg {
+				return OpenWorkspacePickerMsg{}
 			}
-
-			dirs, err := a.fileManager.ListDirectories(startDir)
-			if err != nil {
-				a.statusMessage = "Error listing directories: " + err.Error()
-				return a, nil
-			}
-
-			a.folderPickerPath = startDir
-			a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
-			a.folderPickerIndex = 0
-			a.showFolderPicker = true
-			a.statusMessage = "Select a folder to set as workspace"
-			return a, nil
 
 		case "ctrl+n":
 			// New file prompt
@@ -2090,8 +2165,11 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			}
 		}
 
+		// Ensure all fields are populated with defaults if missing
+		config.EnsureAllFields(jcfg)
+
 		// Prepare config fields and values
-		fields := []string{"agent", "model", "gmodel", "bedrock_model", "ollama_url", "gemini_api", "bedrock_api", "bedrock_region", "workspace"}
+		fields := []string{"agent", "model", "gmodel", "bedrock_model", "ollama_url", "gemini_api", "bedrock_api", "bedrock_region", "workspace", "autonomous"}
 		values := []string{
 			jcfg.Agent,
 			jcfg.Model,
@@ -2102,6 +2180,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 			jcfg.BedrockAPI,
 			jcfg.BedrockRegion,
 			jcfg.Workspace,
+			jcfg.Autonomous,
 		}
 
 		// Enter config mode
@@ -2176,6 +2255,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "  /preview  Preview changes without applying\n"
 		helpText += "  /project  Run a project-wide change across all files\n"
 		helpText += "  /proceed  Apply the last previewed change\n"
+		helpText += "  /create   Autonomously build an app from scratch\n"
 		helpText += "  /model    Show current agent and model info\n"
 		helpText += "  /config   Edit configuration settings\n"
 		helpText += "  /help     Show this help message\n"
@@ -2206,18 +2286,79 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		strings.HasPrefix(trimmedForProject, "/preview /project") ||
 		strings.HasPrefix(trimmedForProject, "/preview/project"))
 
+	// Handle /cancel for AutonomousCreator
+	if a.autonomousCreator != nil && a.autonomousCreator.State != agentic.StateDone && strings.TrimSpace(strings.ToLower(message)) == "/cancel" {
+		a.autonomousCreator = nil
+		return func() tea.Msg {
+			return AINotificationMsg{Content: "Autonomous creation task aborted."}
+		}
+	}
+
 	// Handle /proceed — re-run the last preview request without preview mode.
 	if trimmedForProject == "/proceed" {
-		if a.lastPreviewRequest == "" {
+		if a.lastPreviewRequest == "" && (a.autonomousCreator == nil || a.autonomousCreator.State != agentic.StateWaitingApproval) {
 			return func() tea.Msg {
-				return AINotificationMsg{Content: "Nothing to proceed with. Run /preview <request> first."}
+				return AINotificationMsg{Content: "Nothing to proceed with."}
 			}
 		}
+
+		// Check if we are proceeding with an AutonomousCreator plan
+		if a.autonomousCreator != nil && a.autonomousCreator.State == agentic.StateWaitingApproval {
+			a.autonomousCreator.State = agentic.StateSetup
+			return func() tea.Msg {
+				return AutonomousTickMsg{}
+			}
+		}
+
 		// Re-issue as a real run using the stored request text (without /preview)
 		// If it was a project-wide preview, re-run as project-wide
 		message = a.lastPreviewRequest
 		a.lastPreviewRequest = ""
 		isProjectCmd = true
+	}
+
+	trimmedForCreate := strings.TrimSpace(strings.ToLower(message))
+	isCreateCmd := strings.HasPrefix(trimmedForCreate, "/create")
+	if isCreateCmd {
+		if !a.config.Autonomous {
+			return func() tea.Msg {
+				return AINotificationMsg{Content: "Autonomous mode is currently disabled. Enable it via `/config` to use `/create`."}
+			}
+		}
+
+		// Proceed with /create logic if not already running
+		if a.autonomousCreator != nil && a.autonomousCreator.State != agentic.StateDone {
+			return func() tea.Msg {
+				return AINotificationMsg{Content: "An autonomous creation task is already in progress. Type /cancel to abort it first."}
+			}
+		}
+
+		description := strings.TrimSpace(message[len("/create"):])
+		if description == "" {
+			return func() tea.Msg {
+				return AINotificationMsg{Content: "Please provide a description for the application. Usage: `/create A simple text editor`"}
+			}
+		}
+
+		// Add user message to chat history so it can be restored later
+		a.aiPane.AddFixRequest(message, "", "")
+
+		// Show immediate feedback that AI is working
+		a.aiPane.DisplayNotification("🤖 AI is thinking and generating implementation plan...")
+
+		a.autonomousCreator = agentic.NewAutonomousCreator(a.aiClient, a.config.DefaultModel, a.config.WorkspaceDir, description)
+
+		// Set callback to open SUMMARY.md in editor when it's created
+		a.autonomousCreator.OpenFileCallback = func(filePath string) error {
+			// Store the file path to be opened in the next tick
+			a.autonomousFileToOpen = filePath
+			return nil
+		}
+
+		// Return a command to tick the autonomous creator immediately to start planning
+		return func() tea.Msg {
+			return AutonomousTickMsg{}
+		}
 	}
 
 	if isProjectCmd {
@@ -2614,5 +2755,116 @@ func (a *App) loadChatHistory(content string) error {
 	// Scroll to bottom
 	a.aiPane.scrollToBottom()
 
+	// Restore autonomous creator state if the last message is waiting for approval
+	a.restoreAutonomousState()
+
 	return nil
+}
+
+// restoreAutonomousState checks if the loaded chat contains an autonomous creation
+// plan waiting for approval and restores the AutonomousCreator state.
+// restoreAutonomousState checks if the loaded chat contains an autonomous creation
+// plan waiting for approval and restores the AutonomousCreator state.
+func (a *App) restoreAutonomousState() {
+	if len(a.aiPane.messages) == 0 {
+		return
+	}
+
+	// Check the last assistant message
+	lastMsg := a.aiPane.messages[len(a.aiPane.messages)-1]
+	if lastMsg.Role != "assistant" {
+		return
+	}
+
+	// Check if it contains the proceed prompt
+	if !strings.Contains(lastMsg.Content, "Do you want to proceed? Type /proceed to continue or /cancel to abort.") {
+		return
+	}
+
+	// Extract the plan from the message
+	// Format: "ai-assist YYYY-MM-DD HH:MM:SS\nPlan generated:\n\n<plan>\n\nDo you want to proceed?"
+	// or: "ai-assist HH:MM:SS\nPlan generated:\n\n<plan>\n\nDo you want to proceed?"
+	// or just: "Plan generated:\n\n<plan>\n\nDo you want to proceed?"
+
+	content := lastMsg.Content
+
+	// Remove the "ai-assist ..." prefix if present (can be with date or just time)
+	if strings.HasPrefix(content, "ai-assist ") {
+		// Find the first newline after "ai-assist"
+		newlineIdx := strings.Index(content, "\n")
+		if newlineIdx != -1 {
+			content = content[newlineIdx+1:]
+		}
+	}
+
+	planStart := strings.Index(content, "Plan generated:")
+	if planStart == -1 {
+		return
+	}
+
+	planContent := content[planStart+len("Plan generated:"):]
+	proceedPrompt := "\n\nDo you want to proceed? Type /proceed to continue or /cancel to abort."
+	planEnd := strings.Index(planContent, proceedPrompt)
+	if planEnd == -1 {
+		return
+	}
+
+	plan := strings.TrimSpace(planContent[:planEnd])
+
+	// Find the original /create command from user messages
+	var description string
+	for i := len(a.aiPane.messages) - 1; i >= 0; i-- {
+		msg := a.aiPane.messages[i]
+		if msg.Role == "user" && strings.HasPrefix(strings.ToLower(strings.TrimSpace(msg.Content)), "/create") {
+			description = strings.TrimSpace(msg.Content[len("/create"):])
+			break
+		}
+	}
+
+	if description == "" {
+		// Can't restore without the original description
+		return
+	}
+
+	// Extract project name from the plan
+	projectName := extractProjectNameFromPlan(plan)
+	if projectName == "" {
+		projectName = "ti-autonomous-app"
+	}
+
+	// Reconstruct the AutonomousCreator in StateWaitingApproval
+	a.autonomousCreator = &agentic.AutonomousCreator{
+		AIClient:    a.aiClient,
+		Model:       a.config.DefaultModel,
+		Workspace:   a.config.WorkspaceDir,
+		Description: description,
+		Plan:        plan,
+		ProjectName: projectName,
+		ProjectDir:  filepath.Join(a.config.WorkspaceDir, projectName),
+		State:       agentic.StateWaitingApproval,
+	}
+}
+
+// extractProjectNameFromPlan attempts to extract the project name from the plan text.
+// Looks for patterns like "project name: xyz" or "Project Name: xyz"
+func extractProjectNameFromPlan(plan string) string {
+	lines := strings.Split(plan, "\n")
+	for _, line := range lines {
+		lower := strings.ToLower(line)
+		if strings.Contains(lower, "project name") {
+			// Try to extract the name after the colon
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				name := strings.TrimSpace(parts[1])
+				// Remove common formatting characters
+				name = strings.Trim(name, "` *-\"'")
+				// Take only the first word if multiple
+				words := strings.Fields(name)
+				if len(words) > 0 {
+					return words[0]
+				}
+			}
+		}
+	}
+	return ""
 }
