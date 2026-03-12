@@ -418,10 +418,6 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 
 			url := fmt.Sprintf("http://localhost:%s", port)
 
-			// Print test plan before running
-			testPlan := fmt.Sprintf("ai-assist %s\nRunning smoke tests:\n  1. Start server process\n  2. Wait up to 15s for server to become ready\n  3. HTTP GET %s (expect 2xx response)\n  4. Kill server and report result\n",
-				getCurrentTime(), url)
-
 			// Build the server command — prefer venv python for everything
 			pythonBin := detectVenvPython(c.ProjectDir)
 			if pythonBin == "" {
@@ -429,6 +425,7 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			}
 
 			var serverCmd *exec.Cmd
+			var runArgs []string
 			if strings.Contains(cmdLower, "uvicorn") {
 				// Extract the app target from the command (e.g. "main:app")
 				appTarget := "main:app"
@@ -439,29 +436,41 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 						break
 					}
 				}
-				serverCmd = exec.Command(pythonBin, "-m", "uvicorn", appTarget, "--port", port)
+				runArgs = []string{"-m", "uvicorn", appTarget, "--port", port}
 			} else {
 				mainFile := c.findMainPythonFile()
 				if mainFile != "" {
-					serverCmd = exec.Command(pythonBin, mainFile)
-				} else if runtime.GOOS == "windows" {
-					serverCmd = exec.Command("cmd", "/C", cmdStr)
-				} else {
-					serverCmd = exec.Command("bash", "-c", cmdStr)
+					runArgs = []string{mainFile}
 				}
 			}
+
+			if len(runArgs) > 0 {
+				serverCmd = exec.Command(pythonBin, runArgs...)
+			} else if runtime.GOOS == "windows" {
+				serverCmd = exec.Command("cmd", "/C", cmdStr)
+			} else {
+				serverCmd = exec.Command("bash", "-c", cmdStr)
+			}
+
+			// Print test plan now that we know the exact command
+			testPlan := fmt.Sprintf("ai-assist %s\nRunning smoke tests:\n  1. Start server: %s %s\n  2. Wait up to 30s for server to become ready\n  3. HTTP GET %s (expect 2xx response)\n  4. Kill server and report result\n",
+				getCurrentTime(), pythonBin, strings.Join(runArgs, " "), url)
 			serverCmd.Dir = c.ProjectDir
 			setProcGroupAttr(serverCmd)
+
+			// Capture stderr so we can report it on failure
+			var stderrBuf strings.Builder
+			serverCmd.Stderr = &stderrBuf
 
 			startErr := serverCmd.Start()
 			if startErr != nil {
 				return "", fmt.Errorf("failed to start server for testing: %v", startErr)
 			}
 
-			// Poll for HTTP readiness (up to 15s)
+			// Poll for HTTP readiness (up to 30s)
 			httpReady := false
 			client := &http.Client{Timeout: 2 * time.Second}
-			for i := 0; i < 15; i++ {
+			for i := 0; i < 30; i++ {
 				time.Sleep(1 * time.Second)
 				resp, err := client.Get(url)
 				if err == nil {
@@ -477,7 +486,11 @@ Return ONLY this single bash command, no formatting, no markdown.`,
 			_, _ = serverCmd.Process.Wait()
 
 			if !httpReady {
-				return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 15 seconds\n\nAborting autonomous creation.", serverCmd.Process.Pid, url)
+				errOutput := strings.TrimSpace(stderrBuf.String())
+				if errOutput != "" {
+					return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 30 seconds\nServer output:\n%s\n\nAborting autonomous creation.", serverCmd.Process.Pid, url, errOutput)
+				}
+				return "", fmt.Errorf("server started (PID %d) but did not respond at %s within 30 seconds\n\nAborting autonomous creation.", serverCmd.Process.Pid, url)
 			}
 
 			c.State = StateDocumentation
