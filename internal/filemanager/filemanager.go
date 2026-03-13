@@ -400,6 +400,18 @@ func (fm *FileManager) ListDirectories(dirPath string) ([]string, error) {
 	return dirs, nil
 }
 
+// CreateDirectory creates a new directory at the specified path
+func (fm *FileManager) CreateDirectory(dirPath string) error {
+	fullPath := fm.resolvePath(dirPath)
+	
+	// Create the directory with all parent directories
+	if err := os.MkdirAll(fullPath, 0755); err != nil {
+		return fmt.Errorf("failed to create directory %s: %w", dirPath, err)
+	}
+	
+	return nil
+}
+
 // ListEntries returns directories and files in the given directory (non-recursive)
 func (fm *FileManager) ListEntries(dirPath string) ([]string, []string, error) {
 	entries, err := os.ReadDir(dirPath)
