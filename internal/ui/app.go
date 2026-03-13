@@ -74,6 +74,7 @@ type App struct {
 	showFilePrompt            bool                       // Whether file creation prompt is showing
 	showFilePicker            bool                       // Whether file picker dialog is showing
 	showFolderPicker          bool                       // Whether folder picker dialog is showing
+	showFolderCreatePrompt    bool                       // Whether folder creation prompt is showing
 	showBackupPicker          bool                       // Whether backup picker dialog is showing
 	showChatLoader            bool                       // Whether chat loader dialog is showing
 	showHelp                  bool                       // Whether help dialog is showing
@@ -81,6 +82,7 @@ type App struct {
 	languageToInstall         string                     // Language name for installation prompt
 	fileTypeForInstall        string                     // File type that triggered install check
 	filePromptBuffer          string                     // Buffer for file name input
+	folderCreateBuffer        string                     // Buffer for new folder name input
 	fileList                  []string                   // List of files for picker
 	folderList                []string                   // List of folders for picker
 	backupList                []string                   // List of backups for picker
@@ -253,7 +255,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		a.folderPickerPath = startDir
-		a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
+		a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)", "[ Create New Folder ]"}, dirs...)
 		a.folderPickerIndex = 0
 		a.showFolderPicker = true
 		a.statusMessage = "Select a folder to set as workspace"
@@ -773,6 +775,66 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Handle folder creation prompt dialog
+		if a.showFolderCreatePrompt {
+			switch msg.String() {
+			case "enter":
+				// Create new folder
+				if a.folderCreateBuffer != "" {
+					newFolderPath := filepath.Join(a.folderPickerPath, a.folderCreateBuffer)
+					
+					// Check if folder already exists
+					if _, err := os.Stat(newFolderPath); err == nil {
+						a.statusMessage = "Folder already exists: " + a.folderCreateBuffer
+					} else {
+						// Create the folder
+						if err := a.fileManager.CreateDirectory(newFolderPath); err != nil {
+							a.statusMessage = "Error creating folder: " + err.Error()
+						} else {
+							a.statusMessage = "Created folder: " + a.folderCreateBuffer
+							
+							// Refresh folder list to show the new folder
+							dirs, err := a.fileManager.ListDirectories(a.folderPickerPath)
+							if err != nil {
+								a.statusMessage = "Error refreshing folder list: " + err.Error()
+							} else {
+								a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)", "[ Create New Folder ]"}, dirs...)
+								// Find and select the newly created folder
+								for i, dir := range a.folderList {
+									if dir == a.folderCreateBuffer {
+										a.folderPickerIndex = i
+										break
+									}
+								}
+							}
+						}
+					}
+				}
+				a.showFolderCreatePrompt = false
+				a.showFolderPicker = true
+				a.folderCreateBuffer = ""
+				return a, nil
+			case "esc":
+				// Cancel folder creation and return to folder picker
+				a.showFolderCreatePrompt = false
+				a.showFolderPicker = true
+				a.folderCreateBuffer = ""
+				a.statusMessage = "Folder creation cancelled"
+				return a, nil
+			case "backspace":
+				if len(a.folderCreateBuffer) > 0 {
+					a.folderCreateBuffer = a.folderCreateBuffer[:len(a.folderCreateBuffer)-1]
+				}
+				return a, nil
+			default:
+				// Add character to buffer
+				if len(msg.String()) == 1 {
+					a.folderCreateBuffer += msg.String()
+				}
+				return a, nil
+			}
+		}
+
 		// Handle folder picker dialog
 		if a.showFolderPicker {
 			switch msg.String() {
@@ -815,6 +877,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return a, nil
 					}
 
+					if selected == "[ Create New Folder ]" {
+						// Switch to folder creation mode
+						a.showFolderPicker = false
+						a.showFolderCreatePrompt = true
+						a.folderCreateBuffer = ""
+						a.statusMessage = "Enter name for new folder (Esc to cancel)"
+						return a, nil
+					}
+
 					var nextDir string
 					if selected == ".. (Parent Directory)" {
 						nextDir = filepath.Dir(a.folderPickerPath)
@@ -830,7 +901,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 
 					a.folderPickerPath = nextDir
-					a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)"}, dirs...)
+					a.folderList = append([]string{"[ Select Current Directory ]", ".. (Parent Directory)", "[ Create New Folder ]"}, dirs...)
 					a.folderPickerIndex = 0
 					return a, nil
 				}
@@ -1959,6 +2030,33 @@ func (a *App) View() string {
 			Render("[↑↓] Navigate | [Enter] Open | [Esc] Cancel")
 
 		dialog := pickerStyle.Render(fileListDisplay)
+
+		// Center the dialog
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
+	// Show folder creation prompt dialog if needed
+	if a.showFolderCreatePrompt {
+		promptStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(60).
+			Align(lipgloss.Center)
+
+		// Get the current folder path
+		currentPath := a.folderPickerPath
+		if len(currentPath) > 40 {
+			currentPath = "..." + currentPath[len(currentPath)-37:]
+		}
+
+		promptText := "Enter name for new folder:\n"
+		promptText += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("Location: "+currentPath) + "\n\n"
+		promptText += a.folderCreateBuffer + "█\n\n[Enter] to create, [Esc] to cancel"
+
+		dialog := promptStyle.Render(promptText)
 
 		// Center the dialog
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
