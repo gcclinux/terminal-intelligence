@@ -65,6 +65,7 @@ type App struct {
 	aiClient                  ai.AIClient                // AI service client (Ollama or Gemini)
 	agenticFixer              *agentic.AgenticCodeFixer  // Autonomous code fixing orchestrator
 	projectFixer              *agentic.ProjectFixer      // Project-wide agentic fixer
+	agenticProjectFixer       *agentic.AgenticProjectFixer // Project-wide agentic fixer with retry loop
 	autonomousCreator         *agentic.AutonomousCreator // Autonomous application builder
 	activePane                types.PaneType             // Currently focused pane
 	width                     int                        // Terminal width
@@ -167,6 +168,12 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	// Initialize ProjectFixer
 	projectFixer := agentic.NewProjectFixer(aiClient, config.DefaultModel)
 
+	// Initialize AgenticProjectFixer with a no-op logger (final result displayed via message)
+	fixLogger := agentic.NewActionLogger(func(msg string) {
+		// no-op: notifications are displayed via FixSessionCompleteMsg
+	})
+	agenticProjectFixer := agentic.NewAgenticProjectFixer(aiClient, config.DefaultModel, fixLogger)
+
 	// Initialize GitClient and GitPane
 	gitClient := git.NewClient(config.WorkspaceDir)
 	gitPane := NewGitPane(gitClient, config.WorkspaceDir)
@@ -177,6 +184,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		aiClient:             aiClient,
 		agenticFixer:         agenticFixer,
 		projectFixer:         projectFixer,
+		agenticProjectFixer:  agenticProjectFixer,
 		editorPane:           NewEditorPane(fm),
 		aiPane:               NewAIChatPane(aiClient, config.DefaultModel, config.Provider, config.WorkspaceDir),
 		gitPane:              gitPane,
@@ -339,6 +347,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Update agentic fixer
 		a.agenticFixer = agentic.NewAgenticCodeFixer(a.aiClient, a.config.DefaultModel)
+
+		// Update agentic project fixer
+		fixLogger := agentic.NewActionLogger(func(msg string) {})
+		a.agenticProjectFixer = agentic.NewAgenticProjectFixer(a.aiClient, a.config.DefaultModel, fixLogger)
 
 		// Re-check AI availability with the new config
 		a.aiPane.aiChecked = false
@@ -690,6 +702,60 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		return a, tea.Batch(cmds...)
+
+	case FixSessionCompleteMsg:
+		a.aiPane.streaming = false
+
+		if msg.Error != nil {
+			a.aiPane.DisplayNotification("Fix session error: " + msg.Error.Error())
+			return a, nil
+		}
+
+		result := msg.Result
+		if result == nil {
+			a.aiPane.DisplayNotification("Fix session returned no result.")
+			return a, nil
+		}
+
+		// Build a summary to display
+		if result.Success && result.FinalReport != nil {
+			formatted := agentic.FormatChangeReport(result.FinalReport)
+			summary := fmt.Sprintf("✅ Fix successful after %d attempt(s) across %d cycle(s).\n\n%s",
+				result.TotalAttempts, result.TotalCycles, formatted)
+			a.aiPane.DisplayNotification(summary)
+
+			// Open modified files in the editor
+			if len(result.FinalReport.FilesModified) > 0 {
+				paths := make([]string, 0, len(result.FinalReport.FilesModified))
+				for _, f := range result.FinalReport.FilesModified {
+					if f.Path != "" {
+						paths = append(paths, f.Path)
+					}
+				}
+				if len(paths) > 0 {
+					if err := a.editorPane.LoadFile(paths[0]); err == nil {
+						a.activePane = types.EditorPaneType
+						a.editorPane.focused = true
+						a.aiPane.focused = false
+					}
+					if len(paths) > 1 {
+						cmds = append(cmds, func() tea.Msg {
+							return ProjectFileOpenMsg{Paths: paths[1:]}
+						})
+					}
+				}
+			}
+		} else {
+			errMsg := result.ErrorMessage
+			if errMsg == "" {
+				errMsg = "Fix session completed without success."
+			}
+			summary := fmt.Sprintf("❌ %s\nAttempts: %d, Cycles: %d",
+				errMsg, result.TotalAttempts, result.TotalCycles)
+			a.aiPane.DisplayNotification(summary)
+		}
+
 		return a, tea.Batch(cmds...)
 
 	case ProjectFileOpenMsg:
@@ -2550,6 +2616,38 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		fileContent = fileContext.FileContent
 		filePath = fileContext.FilePath
 		fileType = fileContext.FileType
+	}
+
+	// Handle /fix command — route to project-wide agentic fixer (Req 1.2, 1.3, 6.7)
+	if strings.HasPrefix(trimmedMsg, "/fix") {
+		fixMessage := strings.TrimSpace(message[len("/fix"):])
+		if fixMessage == "" {
+			return func() tea.Msg {
+				return AINotificationMsg{Content: "Please provide a fix description. Usage: /fix <description of the issue>"}
+			}
+		}
+
+		// Get open file path if available (Req 1.3: include as priority candidate)
+		openFilePath := ""
+		if fileContext != nil {
+			openFilePath = fileContext.FilePath
+		}
+
+		request := &agentic.FixSessionRequest{
+			Message:      fixMessage,
+			ProjectRoot:  a.aiPane.workspaceRoot,
+			OpenFilePath: openFilePath,
+			MaxAttempts:  9,
+			MaxCycles:    3,
+		}
+
+		a.aiPane.AddFixRequest(message, openFilePath, "")
+		a.aiPane.streaming = true
+
+		return func() tea.Msg {
+			result, err := a.agenticProjectFixer.ProcessFixCommand(request, nil)
+			return FixSessionCompleteMsg{Result: result, Error: err}
+		}
 	}
 
 	// Step 2: Determine if this is a fix request upfront

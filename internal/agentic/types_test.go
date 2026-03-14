@@ -2,6 +2,7 @@ package agentic
 
 import (
 	"testing"
+	"time"
 )
 
 // TestFixRequest_Validate tests the validation of FixRequest
@@ -352,6 +353,180 @@ func TestFixDetectionResult_Validate(t *testing.T) {
 			err := tt.result.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FixDetectionResult.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestFixSession_Validate tests the validation of FixSession
+func TestFixSession_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		session FixSession
+		wantErr bool
+	}{
+		{
+			name: "valid session",
+			session: FixSession{
+				OriginalAsk: "fix the tests",
+				StartTime:   time.Now(),
+				Snapshots:   map[string][]byte{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty original ask",
+			session: FixSession{
+				OriginalAsk: "",
+				StartTime:   time.Now(),
+				Snapshots:   map[string][]byte{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "whitespace-only original ask",
+			session: FixSession{
+				OriginalAsk: "   ",
+				StartTime:   time.Now(),
+				Snapshots:   map[string][]byte{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero start time",
+			session: FixSession{
+				OriginalAsk: "fix the tests",
+				StartTime:   time.Time{},
+				Snapshots:   map[string][]byte{},
+			},
+			wantErr: true,
+		},
+		{
+			name: "nil snapshots",
+			session: FixSession{
+				OriginalAsk: "fix the tests",
+				StartTime:   time.Now(),
+				Snapshots:   nil,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.session.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("FixSession.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestFixSessionRequest_Validate tests the validation of FixSessionRequest
+func TestFixSessionRequest_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		request FixSessionRequest
+		wantErr bool
+	}{
+		{
+			name: "valid request with defaults",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 9,
+				MaxCycles:   3,
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid request with open file",
+			request: FixSessionRequest{
+				Message:      "fix the bug",
+				ProjectRoot:  "/home/user/project",
+				OpenFilePath: "/home/user/project/main.go",
+				MaxAttempts:  9,
+				MaxCycles:    3,
+			},
+			wantErr: false,
+		},
+		{
+			name: "empty message",
+			request: FixSessionRequest{
+				Message:     "",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 9,
+				MaxCycles:   3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "whitespace-only message",
+			request: FixSessionRequest{
+				Message:     "   ",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 9,
+				MaxCycles:   3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty project root",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "",
+				MaxAttempts: 9,
+				MaxCycles:   3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero max attempts",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 0,
+				MaxCycles:   3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative max attempts",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: -1,
+				MaxCycles:   3,
+			},
+			wantErr: true,
+		},
+		{
+			name: "zero max cycles",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 9,
+				MaxCycles:   0,
+			},
+			wantErr: true,
+		},
+		{
+			name: "negative max cycles",
+			request: FixSessionRequest{
+				Message:     "fix the bug",
+				ProjectRoot: "/home/user/project",
+				MaxAttempts: 9,
+				MaxCycles:   -1,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.request.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("FixSessionRequest.Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

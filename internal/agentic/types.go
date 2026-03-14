@@ -23,6 +23,7 @@ package agentic
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // FixRequest represents a request to fix code
@@ -186,4 +187,105 @@ type ProjectFixRequest struct {
 	Message     string
 	ProjectRoot string
 	PreviewMode bool
+}
+
+// FixSession holds all state for a single /fix invocation.
+// Invariants:
+// - OriginalAsk must not be empty
+// - StartTime must not be zero
+// - Snapshots must not be nil
+type FixSession struct {
+	OriginalAsk    string
+	StartTime      time.Time
+	Attempts       []FixAttempt
+	Snapshots      map[string][]byte
+	CurrentCycle   int
+	AttemptInCycle int
+	RankedFiles    []string
+}
+
+// Validate checks if the FixSession satisfies its invariants.
+func (fs *FixSession) Validate() error {
+	if strings.TrimSpace(fs.OriginalAsk) == "" {
+		return fmt.Errorf("OriginalAsk must not be empty")
+	}
+	if fs.StartTime.IsZero() {
+		return fmt.Errorf("StartTime must not be zero")
+	}
+	if fs.Snapshots == nil {
+		return fmt.Errorf("Snapshots must not be nil")
+	}
+	return nil
+}
+
+// FixAttempt records a single attempt within a fix session.
+// Invariants:
+// - Number must be > 0
+// - Timestamp must not be zero
+type FixAttempt struct {
+	Number         int
+	Cycle          int
+	Strategy       Strategy
+	FilesModified  []FileResult
+	PatchesApplied []searchReplacePatch
+	TestCommand    string
+	TestResult     *TestResult
+	Timestamp      time.Time
+}
+
+// Strategy describes the approach taken in a fix attempt.
+type Strategy struct {
+	Description string
+	Prompt      string
+	AIResponse  string
+}
+
+// FixSessionRequest is the input to the agentic fixer.
+// Invariants:
+// - Message must not be empty
+// - ProjectRoot must not be empty
+// - MaxAttempts must be > 0
+// - MaxCycles must be > 0
+type FixSessionRequest struct {
+	Message      string
+	ProjectRoot  string
+	OpenFilePath string
+	MaxAttempts  int
+	MaxCycles    int
+}
+
+// Validate checks if the FixSessionRequest satisfies its invariants.
+func (r *FixSessionRequest) Validate() error {
+	if strings.TrimSpace(r.Message) == "" {
+		return fmt.Errorf("Message must not be empty")
+	}
+	if strings.TrimSpace(r.ProjectRoot) == "" {
+		return fmt.Errorf("ProjectRoot must not be empty")
+	}
+	if r.MaxAttempts <= 0 {
+		return fmt.Errorf("MaxAttempts must be > 0; got: %d", r.MaxAttempts)
+	}
+	if r.MaxCycles <= 0 {
+		return fmt.Errorf("MaxCycles must be > 0; got: %d", r.MaxCycles)
+	}
+	return nil
+}
+
+// FixSessionResult is the output from the agentic fixer.
+type FixSessionResult struct {
+	Success       bool
+	TotalAttempts int
+	TotalCycles   int
+	Attempts      []FixAttempt
+	FinalReport   *ChangeReport
+	ErrorMessage  string
+}
+
+// TestResult captures the outcome of running a test command.
+type TestResult struct {
+	ExitCode int
+	Stdout   string
+	Stderr   string
+	Duration time.Duration
+	TimedOut bool
 }

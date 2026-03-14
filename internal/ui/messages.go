@@ -39,3 +39,9 @@ type OpenWorkspacePickerMsg struct{}
 
 // AutonomousTickMsg signals the App to invoke the Step() method on the active AutonomousCreator.
 type AutonomousTickMsg struct{}
+
+// FixSessionCompleteMsg is sent when the AgenticProjectFixer finishes a /fix session.
+type FixSessionCompleteMsg struct {
+	Result *agentic.FixSessionResult
+	Error  error
+}
