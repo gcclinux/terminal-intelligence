@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // stubAIClient is a configurable stub for AIClient used in project_fixer tests.
@@ -16,7 +18,7 @@ type stubAIClient struct {
 
 func (s *stubAIClient) IsAvailable() (bool, error) { return true, nil }
 
-func (s *stubAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (s *stubAIClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if s.err != nil {
 		return nil, s.err
 	}

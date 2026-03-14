@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // AIClient is an interface for AI service providers.
@@ -27,11 +29,12 @@ type AIClient interface {
 	//   - prompt: The input prompt for the AI model
 	//   - model: The model identifier to use for generation
 	//   - context: Optional context tokens for conversation continuity (can be nil)
+	//   - onTokenUsage: Optional callback invoked with actual token usage when stream completes (can be nil)
 	//
 	// Returns a channel that streams response chunks as they're generated.
 	// The channel is closed when generation completes.
 	// Returns an error if generation cannot be started.
-	Generate(prompt string, model string, context []int) (<-chan string, error)
+	Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error)
 
 	// ListModels lists available models from the AI provider.
 	// Returns a slice of model identifiers that can be used with Generate.
@@ -256,7 +259,7 @@ func (f *AgenticCodeFixer) IsSearchRequest(message string) bool {
 func (f *AgenticCodeFixer) ExtractSearchTerms(message string) ([]string, error) {
 	prompt := fmt.Sprintf("Analyze the following user request to find a specific file or code snippet.\n\nUser Request: %q\n\nExtract a comma-separated list of search queries to try, ordered from most specific to least specific. Include base variations of words (e.g., 'tokenized' -> 'token', 'prefixes' -> 'prefix') and synonyms. Output ONLY the raw comma-separated list without quotes, explanations, or markdown. Example: tokenized search pattern, token search pattern, search pattern, token, search", message)
 
-	responseChan, err := f.aiClient.Generate(prompt, f.model, nil)
+	responseChan, err := f.aiClient.Generate(prompt, f.model, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -496,7 +499,7 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 
 	// Step 3: Call AI client to generate response (Requirement 2.1)
 	f.logInfo("Calling AI model: %s", f.model)
-	responseChan, err := f.aiClient.Generate(prompt, f.model, nil)
+	responseChan, err := f.aiClient.Generate(prompt, f.model, nil, nil)
 	if err != nil {
 		f.logError("Failed to generate fix: %v", err)
 		return &FixResult{

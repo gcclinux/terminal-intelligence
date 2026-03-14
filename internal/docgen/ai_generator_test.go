@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -227,7 +229,7 @@ type mockStreamClient struct {
 	err    error // returned directly from Generate (not on channel)
 }
 
-func (m *mockStreamClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *mockStreamClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -310,7 +312,7 @@ type mockSelectiveClient struct {
 	callCount int
 }
 
-func (m *mockSelectiveClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *mockSelectiveClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	m.callCount++
 	if m.callCount == m.failOnNth {
 		return nil, fmt.Errorf("selective failure on call %d", m.callCount)

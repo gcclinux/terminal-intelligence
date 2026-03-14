@@ -1031,7 +1031,7 @@ func runScriptWithFallback(scriptPath, dir string) ([]byte, error, string) {
 }
 
 func aicall(client ai.AIClient, model, prompt string) (string, error) {
-	ch, err := client.Generate(prompt, model, nil)
+	ch, err := client.Generate(prompt, model, nil, nil)
 	if err != nil {
 		return "", err
 	}

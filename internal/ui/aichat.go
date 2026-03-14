@@ -96,8 +96,11 @@ type AIChatPane struct {
 // AIResponseMsg is sent when AI response chunk is received.
 // Used for streaming AI responses from the AI client.
 type AIResponseMsg struct {
-	Content string // Response content
-	Done    bool   // Whether generation is complete
+	Content      string // Response content
+	Done         bool   // Whether generation is complete
+	InputTokens  int    // Actual input token count from API
+	OutputTokens int    // Actual output token count from API
+	TotalTokens  int    // Actual total token count from API
 }
 
 // InsertCodeMsg is sent when user wants to insert code into editor.
@@ -406,9 +409,18 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 
 	a.streaming = true
 
+	// Capture pointer to the last message (the user message we just appended)
+	// so the onTokenUsage callback can store token counts on the assistant message later.
+	msgIndex := len(a.messages) // The assistant message will be appended at this index after response
+
 	// Return command to start streaming
 	return func() tea.Msg {
-		responseChan, err := a.aiClient.Generate(prompt, a.model, nil)
+		var tokenUsage types.TokenUsage
+		onTokenUsage := func(usage types.TokenUsage) {
+			tokenUsage = usage
+		}
+
+		responseChan, err := a.aiClient.Generate(prompt, a.model, nil, onTokenUsage)
 		if err != nil {
 			return AIResponseMsg{
 				Content: "Error: " + err.Error(),
@@ -422,10 +434,14 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 			fullResponse.WriteString(chunk)
 		}
 
-		// Return complete response as message
+		// Return complete response with token usage
+		_ = msgIndex // will be used when storing tokens on the ChatMessage
 		return AIResponseMsg{
-			Content: fullResponse.String(),
-			Done:    true,
+			Content:      fullResponse.String(),
+			Done:         true,
+			InputTokens:  tokenUsage.InputTokens,
+			OutputTokens: tokenUsage.OutputTokens,
+			TotalTokens:  tokenUsage.TotalTokens,
 		}
 	}
 }
@@ -436,11 +452,20 @@ func (a *AIChatPane) SendMessage(message string, context string) tea.Cmd {
 // Parameters:
 //   - response: AI response content
 func (a *AIChatPane) DisplayResponse(response string) {
+	a.DisplayResponseWithTokens(response, 0, 0, 0)
+}
+
+// DisplayResponseWithTokens displays AI response with actual token usage data.
+// Adds the response to conversation history with token counts, extracts code blocks, and scrolls to bottom.
+func (a *AIChatPane) DisplayResponseWithTokens(response string, inputTokens, outputTokens, totalTokens int) {
 	assistantMsg := types.ChatMessage{
 		Role:            "assistant",
 		Content:         response,
 		Timestamp:       time.Now(),
 		ContextIncluded: false,
+		InputTokens:     inputTokens,
+		OutputTokens:    outputTokens,
+		TotalTokens:     totalTokens,
 	}
 	a.messages = append(a.messages, assistantMsg)
 	a.appendMessageToSessionLog(assistantMsg)
@@ -753,7 +778,7 @@ func (a *AIChatPane) Update(msg tea.Msg) tea.Cmd {
 	// Removed WindowSizeMsg handling - size is set by app.go
 	case AIResponseMsg:
 		if msg.Done {
-			a.DisplayResponse(msg.Content)
+			a.DisplayResponseWithTokens(msg.Content, msg.InputTokens, msg.OutputTokens, msg.TotalTokens)
 		}
 	case AINotificationMsg:
 		a.DisplayNotification(msg.Content)
@@ -1667,20 +1692,21 @@ func (a *AIChatPane) View() string {
 		actualInputLines = 3
 	}
 
-	// Count words and estimate tokens (4 chars ≈ 1 token)
+	// Count words and sum actual token counts from API responses
 	sessionWords := 0
-	sessionTokens := 0
+	sessionInputTokens := 0
+	sessionOutputTokens := 0
 	for _, msg := range a.messages {
 		fullText := msg.Content
 		if msg.ContextContent != "" {
 			fullText += "\n" + msg.ContextContent
 		}
 		sessionWords += len(strings.Fields(fullText))
-		sessionTokens += len(fullText) / 4
+		sessionInputTokens += msg.InputTokens
+		sessionOutputTokens += msg.OutputTokens
 	}
 
 	wordsCount := sessionWords + len(strings.Fields(a.inputBuffer))
-	tokensCount := sessionTokens + len(a.inputBuffer)/4
 
 	// Build status line to show inside the input box
 	statusText := fmt.Sprintf("⚡ %s/%s", a.provider, a.model)
@@ -1693,7 +1719,7 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Add stats
-	statsStr := fmt.Sprintf(" | %d words | ~%d tokens", wordsCount, tokensCount)
+	statsStr := fmt.Sprintf(" | %d words | %d in / %d out tokens", wordsCount, sessionInputTokens, sessionOutputTokens)
 	statusText += statsStr
 
 	statusColor := "15" // white

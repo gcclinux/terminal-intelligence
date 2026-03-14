@@ -599,7 +599,7 @@ func TestProperty_StreamingResponseDelivery(t *testing.T) {
 			// Call Generate
 			// Note: This will fail with actual AWS API call since we're using fake credentials
 			// But we can verify the method signature and return type
-			responseChan, err := client.Generate(prompt, model, nil)
+			responseChan, err := client.Generate(prompt, model, nil, nil)
 
 			// The method should return a channel even if the API call fails
 			// (the error would be sent through the channel or returned as error)
@@ -682,7 +682,7 @@ func TestProperty_ChannelClosureOnCompletion(t *testing.T) {
 			// Call Generate
 			// Note: This will fail with actual AWS API call since we're using fake credentials
 			// The goroutine will encounter an error and should close the channel
-			responseChan, err := client.Generate(prompt, model, nil)
+			responseChan, err := client.Generate(prompt, model, nil, nil)
 
 			// If Generate returns an error immediately, that's acceptable
 			// (the channel won't be created in this case)
@@ -1287,7 +1287,7 @@ func TestProperty_ErrorPropagationDuringStreaming(t *testing.T) {
 
 			// Call Generate with fake credentials
 			// This will fail when trying to invoke the model
-			responseChan, err := client.Generate(prompt, model, nil)
+			responseChan, err := client.Generate(prompt, model, nil, nil)
 
 			// If Generate returns an error immediately, that's acceptable
 			// (the error is returned directly rather than through the channel)

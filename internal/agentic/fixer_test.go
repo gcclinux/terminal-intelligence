@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // mockAIClient is a mock implementation of AIClient for testing
@@ -13,7 +15,7 @@ func (m *mockAIClient) IsAvailable() (bool, error) {
 	return true, nil
 }
 
-func (m *mockAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *mockAIClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	ch := make(chan string, 1)
 	ch <- "mock response"
 	close(ch)
@@ -1301,7 +1303,7 @@ func (m *mockAIClientWithGenerateError) IsAvailable() (bool, error) {
 	return true, nil
 }
 
-func (m *mockAIClientWithGenerateError) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *mockAIClientWithGenerateError) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	return nil, m.generateErr
 }
 
@@ -1357,7 +1359,7 @@ func (m *mockAIClientWithCodeBlock) IsAvailable() (bool, error) {
 	return m.available, m.err
 }
 
-func (m *mockAIClientWithCodeBlock) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *mockAIClientWithCodeBlock) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if m.err != nil {
 		return nil, m.err
 	}

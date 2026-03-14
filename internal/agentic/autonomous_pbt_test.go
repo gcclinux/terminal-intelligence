@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/user/terminal-intelligence/internal/types"
 	"pgregory.net/rapid"
 )
 
@@ -366,7 +367,7 @@ type sequentialStubAIClient struct {
 
 func (s *sequentialStubAIClient) IsAvailable() (bool, error) { return true, nil }
 
-func (s *sequentialStubAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (s *sequentialStubAIClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	idx := s.callIndex
 	if idx >= len(s.responses) {
 		idx = len(s.responses) - 1

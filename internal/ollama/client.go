@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // OllamaClient handles communication with the Ollama service via REST API
@@ -58,11 +60,13 @@ type generateRequest struct {
 
 // generateResponse represents a streaming response chunk from the generate API
 type generateResponse struct {
-	Model     string `json:"model"`
-	Response  string `json:"response"`
-	Done      bool   `json:"done"`
-	Context   []int  `json:"context,omitempty"`
-	Error     string `json:"error,omitempty"`
+	Model           string `json:"model"`
+	Response        string `json:"response"`
+	Done            bool   `json:"done"`
+	Context         []int  `json:"context,omitempty"`
+	Error           string `json:"error,omitempty"`
+	PromptEvalCount int    `json:"prompt_eval_count"`
+	EvalCount       int    `json:"eval_count"`
 }
 
 // Generate generates AI response with streaming
@@ -70,8 +74,9 @@ type generateResponse struct {
 //   prompt: string - user's prompt to the AI
 //   model: string - model name to use (default: "llama2")
 //   context: []int - optional context tokens from previous conversation
+//   onTokenUsage: callback invoked with actual token usage when stream completes
 // Returns: channel for streaming response chunks, error if request fails
-func (oc *OllamaClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (oc *OllamaClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if model == "" {
 		model = "llama2"
 	}
@@ -141,6 +146,13 @@ func (oc *OllamaClient) Generate(prompt string, model string, context []int) (<-
 
 			// Stop if done
 			if genResp.Done {
+				if onTokenUsage != nil {
+					onTokenUsage(types.TokenUsage{
+						InputTokens:  genResp.PromptEvalCount,
+						OutputTokens: genResp.EvalCount,
+						TotalTokens:  genResp.PromptEvalCount + genResp.EvalCount,
+					})
+				}
 				return
 			}
 		}

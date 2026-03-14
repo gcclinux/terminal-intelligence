@@ -7,6 +7,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // GeminiClient handles communication with Google's Gemini API
@@ -21,6 +23,17 @@ func NewGeminiClient(apiKey string) *GeminiClient {
 	return &GeminiClient{
 		apiKey:  apiKey,
 		baseURL: "https://generativelanguage.googleapis.com/v1beta",
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
+	}
+}
+
+// NewGeminiClientWithURL creates a new Gemini client with a custom base URL (for testing)
+func NewGeminiClientWithURL(apiKey string, baseURL string) *GeminiClient {
+	return &GeminiClient{
+		apiKey:  apiKey,
+		baseURL: baseURL,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
@@ -42,8 +55,16 @@ type geminiPart struct {
 
 // geminiResponse represents the response from Gemini API
 type geminiResponse struct {
-	Candidates []geminiCandidate `json:"candidates"`
-	Error      *geminiError      `json:"error,omitempty"`
+	Candidates    []geminiCandidate    `json:"candidates"`
+	Error         *geminiError         `json:"error,omitempty"`
+	UsageMetadata *geminiUsageMetadata `json:"usageMetadata,omitempty"`
+}
+
+// geminiUsageMetadata represents token usage data from the Gemini API response
+type geminiUsageMetadata struct {
+	PromptTokenCount     int `json:"promptTokenCount"`
+	CandidatesTokenCount int `json:"candidatesTokenCount"`
+	TotalTokenCount      int `json:"totalTokenCount"`
 }
 
 type geminiCandidate struct {
@@ -65,7 +86,7 @@ func (gc *GeminiClient) IsAvailable() (bool, error) {
 }
 
 // Generate generates AI response from Gemini
-func (gc *GeminiClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (gc *GeminiClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if model == "" {
 		model = "gemini-2.0-flash-exp"
 	}
@@ -124,6 +145,21 @@ func (gc *GeminiClient) Generate(prompt string, model string, context []int) (<-
 	go func() {
 		defer close(responseChan)
 		
+		// Extract and report token usage from usageMetadata
+		if onTokenUsage != nil {
+			var inputTokens, outputTokens, totalTokens int
+			if geminiResp.UsageMetadata != nil {
+				inputTokens = geminiResp.UsageMetadata.PromptTokenCount
+				outputTokens = geminiResp.UsageMetadata.CandidatesTokenCount
+				totalTokens = geminiResp.UsageMetadata.TotalTokenCount
+			}
+			onTokenUsage(types.TokenUsage{
+				InputTokens:  inputTokens,
+				OutputTokens: outputTokens,
+				TotalTokens:  totalTokens,
+			})
+		}
+
 		if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
 			responseChan <- geminiResp.Candidates[0].Content.Parts[0].Text
 		}

@@ -14,6 +14,7 @@ import (
 	awsbedrock "github.com/aws/aws-sdk-go-v2/service/bedrock"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
+	apptypes "github.com/user/terminal-intelligence/internal/types"
 )
 
 // BedrockClient handles communication with AWS Bedrock API
@@ -224,9 +225,10 @@ func (bc *BedrockClient) IsAvailable() (bool, error) {
 //	prompt: string - user's prompt to the AI
 //	model: string - model name to use (default: "us.anthropic.claude-haiku-4-5-v1:0")
 //	context: []int - optional context tokens from previous conversation
+//	onTokenUsage: func(apptypes.TokenUsage) - optional callback to receive actual token usage from the API response
 //
 // Returns: channel for streaming response chunks, error if request fails
-func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (bc *BedrockClient) Generate(prompt string, model string, context []int, onTokenUsage func(apptypes.TokenUsage)) (<-chan string, error) {
 	// Default model to Claude Haiku 4.5 if empty
 	if model == "" {
 		model = "us.anthropic.claude-haiku-4-5-v1:0"
@@ -266,6 +268,9 @@ func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<
 		// Track if we encountered an error during processing
 		var processingErr error
 
+		// Track token usage from streaming events
+		var inputTokens, outputTokens int
+
 		// Process event stream
 		for event := range output.GetStream().Events() {
 			switch e := event.(type) {
@@ -279,8 +284,33 @@ func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<
 					return
 				}
 
+				// Check event type
+				eventType, _ := response["type"].(string)
+
+				// Extract input tokens from message_start event
+				if eventType == "message_start" {
+					if msg, ok := response["message"].(map[string]any); ok {
+						if usage, ok := msg["usage"].(map[string]any); ok {
+							if it, ok := usage["input_tokens"].(float64); ok {
+								inputTokens = int(it)
+							}
+						}
+					}
+				}
+
+				// Extract output tokens from message_delta event
+				// Note: In the Anthropic streaming format, usage is a top-level
+				// field on message_delta events, NOT nested under "delta".
+				if eventType == "message_delta" {
+					if usage, ok := response["usage"].(map[string]any); ok {
+						if ot, ok := usage["output_tokens"].(float64); ok {
+							outputTokens = int(ot)
+						}
+					}
+				}
+
 				// Check for content_block_delta event type
-				if eventType, ok := response["type"].(string); ok && eventType == "content_block_delta" {
+				if eventType == "content_block_delta" {
 					// Extract delta object
 					if delta, ok := response["delta"].(map[string]any); ok {
 						// Extract text from delta
@@ -291,13 +321,30 @@ func (bc *BedrockClient) Generate(prompt string, model string, context []int) (<
 				}
 
 				// Check for message_stop event to close channel
-				if eventType, ok := response["type"].(string); ok && eventType == "message_stop" {
+				if eventType == "message_stop" {
+					// Report token usage before exiting
+					if onTokenUsage != nil {
+						onTokenUsage(apptypes.TokenUsage{
+							InputTokens:  inputTokens,
+							OutputTokens: outputTokens,
+							TotalTokens:  inputTokens + outputTokens,
+						})
+					}
 					return
 				}
 
 			default:
 				// Ignore other event types (including error events which are handled by stream.Err())
 			}
+		}
+
+		// Report token usage before goroutine exits (stream ended without message_stop)
+		if onTokenUsage != nil {
+			onTokenUsage(apptypes.TokenUsage{
+				InputTokens:  inputTokens,
+				OutputTokens: outputTokens,
+				TotalTokens:  inputTokens + outputTokens,
+			})
 		}
 
 		// Check for stream errors after processing completes

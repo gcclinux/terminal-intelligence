@@ -158,7 +158,7 @@ func (g *AIGenerator) Generate(result *AnalysisResult, docType DocumentationType
 
 	g.feedback.NotifyProgress("AI generating...", docType.String())
 
-	ch, err := g.client.Generate(prompt, g.model, nil)
+	ch, err := g.client.Generate(prompt, g.model, nil, nil)
 	if err != nil {
 		g.feedback.NotifyError(err)
 		return nil, err

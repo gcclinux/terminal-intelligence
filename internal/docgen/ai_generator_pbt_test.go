@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/user/terminal-intelligence/internal/types"
 	"pgregory.net/rapid"
 )
 
@@ -124,7 +125,7 @@ type pbtStreamClient struct {
 	chunks []string
 }
 
-func (c *pbtStreamClient) Generate(prompt, model string, context []int) (<-chan string, error) {
+func (c *pbtStreamClient) Generate(prompt, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	ch := make(chan string, len(c.chunks))
 	for _, s := range c.chunks {
 		ch <- s
@@ -139,7 +140,7 @@ func (c *pbtStreamClient) ListModels() ([]string, error) { return nil, nil }
 // pbtErrorClient always returns an error from Generate.
 type pbtErrorClient struct{}
 
-func (c *pbtErrorClient) Generate(prompt, model string, context []int) (<-chan string, error) {
+func (c *pbtErrorClient) Generate(prompt, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	return nil, fmt.Errorf("test error")
 }
 
@@ -149,7 +150,7 @@ func (c *pbtErrorClient) ListModels() ([]string, error) { return nil, nil }
 // pbtUnavailableClient always reports unavailable.
 type pbtUnavailableClient struct{}
 
-func (c *pbtUnavailableClient) Generate(prompt, model string, context []int) (<-chan string, error) {
+func (c *pbtUnavailableClient) Generate(prompt, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	ch := make(chan string)
 	close(ch)
 	return ch, nil
@@ -165,7 +166,7 @@ type pbtSelectiveClient struct {
 	callCount int
 }
 
-func (c *pbtSelectiveClient) Generate(prompt, model string, context []int) (<-chan string, error) {
+func (c *pbtSelectiveClient) Generate(prompt, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	c.callCount++
 	if c.failOnSet[c.callCount] {
 		return nil, fmt.Errorf("selective failure on call %d", c.callCount)

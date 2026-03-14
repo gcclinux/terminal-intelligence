@@ -294,7 +294,7 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 		prompt := apf.buildAgenticPrompt(session, ranked, lastTestResult)
 
 		// (d) Call AI to generate response.
-		responseChan, genErr := apf.aiClient.Generate(prompt, apf.model, nil)
+		responseChan, genErr := apf.aiClient.Generate(prompt, apf.model, nil, nil)
 		if genErr != nil {
 			apf.logger.Log("AI generation failed: %s", genErr.Error())
 			// Record failed attempt and continue.

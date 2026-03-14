@@ -59,6 +59,13 @@ type FileMetadata struct {
 	LastSaved  time.Time
 }
 
+// TokenUsage holds actual token counts from an LLM provider API response
+type TokenUsage struct {
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
+}
+
 // ChatMessage represents a message in the AI conversation
 type ChatMessage struct {
 	Role            string // "user" or "assistant"
@@ -69,6 +76,9 @@ type ChatMessage struct {
 	IsNotification  bool   // True if this is a change notification
 	IsFixRequest    bool   // True if this is a fix request
 	FilePath        string // File path context for fix requests
+	InputTokens     int
+	OutputTokens    int
+	TotalTokens     int
 }
 
 // CommandResult holds the result of a command execution

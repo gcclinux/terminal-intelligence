@@ -266,7 +266,7 @@ func (rr *relevanceRanker) rank(
 	prompt := rr.buildRankingPrompt(paths, request, maxResults)
 
 	// Call the AI.
-	responseChan, err := rr.aiClient.Generate(prompt, rr.model, nil)
+	responseChan, err := rr.aiClient.Generate(prompt, rr.model, nil, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relevance ranker AI call failed: %w", err)
 	}
@@ -520,7 +520,7 @@ func (me *multiFileEditor) edit(
 	prompt := me.buildEditPrompt(entries, request)
 
 	// ── Step 4: Call AI ───────────────────────────────────────────────────────
-	responseChan, err := me.aiClient.Generate(prompt, me.model, nil)
+	responseChan, err := me.aiClient.Generate(prompt, me.model, nil, nil)
 	if err != nil {
 		return nil, nil, unreadable, outOfScope, "", fmt.Errorf("AI generate call failed: %w", err)
 	}

@@ -6,13 +6,14 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/user/terminal-intelligence/internal/types"
 	"pgregory.net/rapid"
 )
 
 // MockAIClient is a mock implementation of ai.AIClient for testing
 type MockAIClient struct{}
 
-func (m *MockAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *MockAIClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	ch := make(chan string, 1)
 	ch <- "Mock AI response"
 	close(ch)
@@ -372,7 +373,7 @@ func TestPipeline_FileConflict(t *testing.T) {
 // MockUnavailableAIClient is a mock AIClient where IsAvailable returns false
 type MockUnavailableAIClient struct{}
 
-func (m *MockUnavailableAIClient) Generate(prompt string, model string, context []int) (<-chan string, error) {
+func (m *MockUnavailableAIClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	ch := make(chan string)
 	close(ch)
 	return ch, nil
