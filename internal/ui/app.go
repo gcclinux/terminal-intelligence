@@ -2546,7 +2546,13 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		// Show immediate feedback that AI is working
 		a.aiPane.DisplayNotification("🤖 AI is thinking and generating implementation plan...")
 
-		a.autonomousCreator = agentic.NewAutonomousCreator(a.aiClient, a.config.DefaultModel, a.config.WorkspaceDir, description)
+		createLogger := agentic.NewActionLogger(func(msg string) {
+			a.aiPane.DisplayNotification(msg)
+		})
+		a.autonomousCreator = agentic.NewAutonomousCreator(
+			a.aiClient, a.config.DefaultModel, a.config.WorkspaceDir, description,
+			a.agenticProjectFixer, createLogger,
+		)
 
 		// Set callback to open SUMMARY.md in editor when it's created
 		a.autonomousCreator.OpenFileCallback = func(filePath string) error {

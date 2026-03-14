@@ -51,10 +51,15 @@ type AutonomousCreator struct {
 	// Running process (for web servers)
 	RunningProcess *exec.Cmd
 	ServerURL      string // URL of the running server
+
+	// Fallback fixer for unresolvable test/build errors (optional, nil = skip fallback)
+	fixer *AgenticProjectFixer
+	// Logger for fallback progress messages (optional, nil = skip logging)
+	logger *ActionLogger
 }
 
 // NewAutonomousCreator initializes a new creator flow.
-func NewAutonomousCreator(client ai.AIClient, model, workspace, desc string) *AutonomousCreator {
+func NewAutonomousCreator(client ai.AIClient, model, workspace, desc string, fixer *AgenticProjectFixer, logger *ActionLogger) *AutonomousCreator {
 	return &AutonomousCreator{
 		AIClient:    client,
 		Model:       model,
@@ -62,7 +67,79 @@ func NewAutonomousCreator(client ai.AIClient, model, workspace, desc string) *Au
 		Description: desc,
 		State:       StatePlanning,
 		FilesToMake: make(map[string]string),
+		fixer:       fixer,
+		logger:      logger,
 	}
+}
+
+// extractFileFromError extracts the first Go compiler file reference from error
+// output matching the pattern <file>.go:<line>:<col>: and returns the absolute
+// path by joining projectDir with the filename. Returns empty string if no match.
+func extractFileFromError(errorOutput string, projectDir string) string {
+	re := regexp.MustCompile(`(\S+\.go):\d+:\d+:`)
+	m := re.FindStringSubmatch(errorOutput)
+	if len(m) < 2 {
+		return ""
+	}
+	return filepath.Join(projectDir, m[1])
+}
+
+// buildFallbackRequest constructs a FixSessionRequest for the fallback fix cycle.
+// It formats the error context into a message and extracts the first file reference
+// from the error output (if any) to set OpenFilePath.
+func buildFallbackRequest(errorOutput, errorType, failedCmd, projectType, projectDir string) *FixSessionRequest {
+	msg := fmt.Sprintf("The following %s error occurred while running %q in a %s project:\n\n%s\n\nPlease analyze the error and fix the code so that the command succeeds.",
+		errorType, failedCmd, projectType, errorOutput)
+	return &FixSessionRequest{
+		Message:      msg,
+		ProjectRoot:  projectDir,
+		MaxAttempts:  5,
+		MaxCycles:    2,
+		OpenFilePath: extractFileFromError(errorOutput, projectDir),
+	}
+}
+
+// fallbackFix delegates an unresolvable error to the AgenticProjectFixer.
+// It returns (nil, nil) when c.fixer is nil so the caller can fall through
+// to the existing abort behaviour.
+func (c *AutonomousCreator) fallbackFix(errorOutput, errorType, failedCmd string) (*FixSessionResult, error) {
+	if c.fixer == nil {
+		return nil, nil
+	}
+
+	projectType := c.detectProjectType()
+
+	if c.logger != nil {
+		c.logger.Log("Starting fallback fix cycle for %s error", errorType)
+	}
+
+	request := buildFallbackRequest(errorOutput, errorType, failedCmd, projectType, c.ProjectDir)
+
+	statusCallback := func(status string) {
+		if c.logger != nil {
+			c.logger.Log("create-fallback: %s", status)
+		}
+	}
+
+	result, err := c.fixer.ProcessFixCommand(request, statusCallback)
+	if err != nil {
+		if c.logger != nil {
+			c.logger.Log("Fallback fix cycle failed with error: %v", err)
+		}
+		return nil, err
+	}
+
+	if result != nil && result.Success {
+		if c.logger != nil {
+			c.logger.Log("Fallback fix cycle succeeded after %d attempts across %d cycles", result.TotalAttempts, result.TotalCycles)
+		}
+	} else if result != nil {
+		if c.logger != nil {
+			c.logger.Log("Fallback fix cycle failed: %s", result.ErrorMessage)
+		}
+	}
+
+	return result, nil
 }
 
 // Emulate a state machine step
@@ -650,7 +727,29 @@ func (c *AutonomousCreator) buildAndRunGo() (string, error) {
 	buildOutput, err := buildCmd.CombinedOutput()
 
 	if err != nil {
-		return "", fmt.Errorf("build failed: %v\nOutput: %s", err, string(buildOutput))
+		buildErrOutput := string(buildOutput)
+		buildCmdStr := "go build -o " + binaryName
+
+		result2, fixErr := c.fallbackFix(buildErrOutput, "build", buildCmdStr)
+		if fixErr != nil {
+			return "", fmt.Errorf("build failed after fallback fix: %v (original output: %s)", fixErr, buildErrOutput)
+		}
+		if result2 == nil {
+			// No fixer available, preserve existing error return behavior
+			return "", fmt.Errorf("build failed: %v\nOutput: %s", err, buildErrOutput)
+		}
+		if result2.Success {
+			// Retry build once
+			retryCmd := exec.Command("go", "build", "-o", binaryName)
+			retryCmd.Dir = c.ProjectDir
+			retryOutput, retryErr := retryCmd.CombinedOutput()
+			if retryErr != nil {
+				return "", fmt.Errorf("build still failed after fallback fix: %v\nRetry output: %s\nOriginal output: %s", retryErr, string(retryOutput), buildErrOutput)
+			}
+			// Retry succeeded, continue normally
+		} else {
+			return "", fmt.Errorf("build failed after fallback fix (%s): %s", result2.ErrorMessage, buildErrOutput)
+		}
 	}
 
 	result.WriteString(fmt.Sprintf("Build successful! Binary: %s\n\n", binaryName))
@@ -1217,8 +1316,22 @@ func (c *AutonomousCreator) attemptTestFix(projectType, testCmd, output string, 
 		return result.String() + fmt.Sprintf("ai-assist %s\nMoving to documentation...", getCurrentTime()), nil
 	}
 
-	// For other errors, just report and abort
-	return "", fmt.Errorf("automated test failed: %v\nOutput: %s\n\nAborting autonomous creation.", testErr, output)
+	// For other errors, try fallback fix before aborting
+	errorOutput := output
+	result2, err := c.fallbackFix(errorOutput, "test", testCmd)
+	if err != nil {
+		return "", fmt.Errorf("test failures could not be resolved after fallback fix: %v (original error: %s)", err, errorOutput)
+	}
+	if result2 == nil {
+		// No fixer available, preserve existing abort behavior
+		return "", fmt.Errorf("test failures could not be resolved: %s", errorOutput)
+	}
+	if result2.Success {
+		c.State = StateDocumentation
+		return fmt.Sprintf("Tests fixed by fallback fixer after %d attempts", result2.TotalAttempts), nil
+	}
+	// Fix was unsuccessful
+	return "", fmt.Errorf("test failures could not be resolved after fallback fix (%s): %s", result2.ErrorMessage, errorOutput)
 }
 
 // detectPythonBinary tries to find the correct Python binary on the system

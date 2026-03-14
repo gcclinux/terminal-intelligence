@@ -1,6 +1,8 @@
 package agentic
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -424,5 +426,135 @@ func TestConvertToWindowsCommands(t *testing.T) {
 				t.Errorf("convertToWindowsCommands() = %q, want %q", result, tt.expectedOutput)
 			}
 		})
+	}
+}
+
+// ─── Unit Tests for fallbackFix, buildFallbackRequest, extractFileFromError ──
+
+// TestFallbackFix_NilFixer verifies that calling fallbackFix on an
+// AutonomousCreator with a nil fixer returns (nil, nil).
+// **Validates: Requirements 1.4**
+func TestFallbackFix_NilFixer(t *testing.T) {
+	stubClient := &stubAIClient{response: "ok"}
+	creator := NewAutonomousCreator(stubClient, "model", "/workspace", "desc", nil, nil)
+
+	result, err := creator.fallbackFix("some error output", "test", "go test ./...")
+
+	if result != nil {
+		t.Fatalf("expected nil result when fixer is nil, got %+v", result)
+	}
+	if err != nil {
+		t.Fatalf("expected nil error when fixer is nil, got %v", err)
+	}
+}
+
+// TestFallbackFix_NilLogger verifies that calling fallbackFix with a non-nil
+// fixer but nil logger does not panic.
+// **Validates: Requirements 4.5**
+func TestFallbackFix_NilLogger(t *testing.T) {
+	stubClient := &stubAIClient{response: "ok"}
+	fixer := NewAgenticProjectFixer(stubClient, "model", NewActionLogger(func(msg string) {}))
+
+	creator := NewAutonomousCreator(stubClient, "model", "/workspace", "desc", fixer, nil)
+	creator.ProjectDir = t.TempDir()
+	creator.FilesToMake = map[string]string{"main.go": "package main"}
+
+	// The test passes if no panic occurs.
+	_, _ = creator.fallbackFix("undefined: foo", "test", "go test ./...")
+}
+
+// TestBuildFallbackRequest_GoError verifies that buildFallbackRequest constructs
+// a correct FixSessionRequest for a Go compiler error, including OpenFilePath.
+// **Validates: Requirements 6.1, 6.5**
+func TestBuildFallbackRequest_GoError(t *testing.T) {
+	projectDir := "/home/user/myproject"
+	errorOutput := "main.go:10:5: undefined: foo"
+
+	req := buildFallbackRequest(errorOutput, "build", "go build -o myapp", "Go", projectDir)
+
+	if !strings.Contains(req.Message, errorOutput) {
+		t.Fatalf("Message does not contain error output: %s", req.Message)
+	}
+	if !strings.Contains(req.Message, "go build -o myapp") {
+		t.Fatalf("Message does not contain failed command: %s", req.Message)
+	}
+	if !strings.Contains(req.Message, "Go") {
+		t.Fatalf("Message does not contain project type: %s", req.Message)
+	}
+	if req.ProjectRoot != projectDir {
+		t.Fatalf("ProjectRoot = %q, want %q", req.ProjectRoot, projectDir)
+	}
+	if req.MaxAttempts != 5 {
+		t.Fatalf("MaxAttempts = %d, want 5", req.MaxAttempts)
+	}
+	if req.MaxCycles != 2 {
+		t.Fatalf("MaxCycles = %d, want 2", req.MaxCycles)
+	}
+
+	wantPath := filepath.Join(projectDir, "main.go")
+	if req.OpenFilePath != wantPath {
+		t.Fatalf("OpenFilePath = %q, want %q", req.OpenFilePath, wantPath)
+	}
+}
+
+// TestBuildFallbackRequest_PythonError verifies that buildFallbackRequest
+// constructs a correct FixSessionRequest for a Python traceback, with an
+// empty OpenFilePath since no .go file pattern is present.
+// **Validates: Requirements 6.1, 6.6**
+func TestBuildFallbackRequest_PythonError(t *testing.T) {
+	projectDir := "/home/user/pyproject"
+	errorOutput := "Traceback (most recent call last):\n  File \"app.py\", line 5, in <module>\n    import nonexistent\nModuleNotFoundError: No module named 'nonexistent'"
+
+	req := buildFallbackRequest(errorOutput, "test", "python -m pytest", "Python", projectDir)
+
+	if !strings.Contains(req.Message, errorOutput) {
+		t.Fatalf("Message does not contain error output: %s", req.Message)
+	}
+	if !strings.Contains(req.Message, "python -m pytest") {
+		t.Fatalf("Message does not contain failed command: %s", req.Message)
+	}
+	if !strings.Contains(req.Message, "Python") {
+		t.Fatalf("Message does not contain project type: %s", req.Message)
+	}
+	if req.ProjectRoot != projectDir {
+		t.Fatalf("ProjectRoot = %q, want %q", req.ProjectRoot, projectDir)
+	}
+	if req.MaxAttempts != 5 {
+		t.Fatalf("MaxAttempts = %d, want 5", req.MaxAttempts)
+	}
+	if req.MaxCycles != 2 {
+		t.Fatalf("MaxCycles = %d, want 2", req.MaxCycles)
+	}
+	if req.OpenFilePath != "" {
+		t.Fatalf("OpenFilePath = %q, want empty string (no .go file pattern)", req.OpenFilePath)
+	}
+}
+
+// TestExtractFileFromError_GoCompiler verifies that extractFileFromError
+// correctly extracts the file path from a Go compiler error.
+// **Validates: Requirements 6.5**
+func TestExtractFileFromError_GoCompiler(t *testing.T) {
+	projectDir := "/home/user/myproject"
+	errorOutput := "main.go:10:5: undefined: foo"
+
+	got := extractFileFromError(errorOutput, projectDir)
+	want := filepath.Join(projectDir, "main.go")
+
+	if got != want {
+		t.Fatalf("extractFileFromError(%q, %q) = %q, want %q", errorOutput, projectDir, got, want)
+	}
+}
+
+// TestExtractFileFromError_NoMatch verifies that extractFileFromError returns
+// an empty string when the error output does not contain a Go file pattern.
+// **Validates: Requirements 6.6**
+func TestExtractFileFromError_NoMatch(t *testing.T) {
+	projectDir := "/home/user/myproject"
+	errorOutput := "some random error"
+
+	got := extractFileFromError(errorOutput, projectDir)
+
+	if got != "" {
+		t.Fatalf("extractFileFromError(%q, %q) = %q, want empty string", errorOutput, projectDir, got)
 	}
 }
