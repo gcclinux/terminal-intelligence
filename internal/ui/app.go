@@ -28,6 +28,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/user/terminal-intelligence/internal/agentic"
 	"github.com/user/terminal-intelligence/internal/ai"
+	"github.com/user/terminal-intelligence/internal/projectctx"
 	"github.com/user/terminal-intelligence/internal/bedrock"
 	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
@@ -101,6 +102,7 @@ type App struct {
 	searchTerms               []string                   // Last search terms used
 	lastPreviewRequest        string                     // Original /project request from the last preview run
 	autonomousFileToOpen      string                     // File path to open after autonomous creation step
+	projectCtxCache           *projectctx.ContextCache   // Cache for project context metadata
 }
 
 // New creates a new application instance with the provided configuration.
@@ -197,6 +199,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		searchResults:        []string{},
 		searchResultIndex:    0,
 		searchTerms:          []string{},
+		projectCtxCache:      projectctx.NewContextCache(),
 	}
 }
 
@@ -556,6 +559,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle Git operation completion
 		if msg.Operation == "clone" && msg.Success && msg.NewDir != "" {
 			// Change working directory to the newly cloned repository
+			a.projectCtxCache.Invalidate(a.config.WorkspaceDir) // Invalidate cache for old workspace (Req 2.3)
 			a.config.WorkspaceDir = msg.NewDir
 
 			// Actually change the process working directory
@@ -921,6 +925,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if selected == "[ Select Current Directory ]" {
 						// Set new workspace directory
 						newDir := a.folderPickerPath
+						a.projectCtxCache.Invalidate(a.config.WorkspaceDir) // Invalidate cache for old workspace (Req 2.3)
 						a.config.WorkspaceDir = newDir
 
 						if err := os.Chdir(newDir); err != nil {
@@ -2450,16 +2455,23 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "Agent Commands\n"
 		helpText += "--------------\n"
 		helpText += "  /fix      Force agentic mode (AI modifies code)\n"
-		helpText += "  /ask      Force conversational mode (no code changes)\n"
+		helpText += "  /ask      Project-aware conversational mode\n"
 		helpText += "  /doc      Generate project documentation\n"
 		helpText += "  /preview  Preview changes without applying\n"
 		helpText += "  /project  Run a project-wide change across all files\n"
 		helpText += "  /proceed  Apply the last previewed change\n"
 		helpText += "  /create   Autonomously build an app from scratch\n"
+		helpText += "  /rescan   Rescan project files for fresh context\n"
 		helpText += "  /model    Show current agent and model info\n"
 		helpText += "  /config   Edit configuration settings\n"
 		helpText += "  /help     Show this help message\n"
 		helpText += "  /quit     Quit the program\n\n"
+		helpText += "Smart Project Query\n"
+		helpText += "-------------------\n"
+		helpText += "  Ask project-level questions and get context-aware answers.\n"
+		helpText += "  The AI auto-detects project questions (e.g. \"how do I build this?\").\n"
+		helpText += "  Use /ask to force project context injection on any message.\n"
+		helpText += "  Use /rescan after major project changes to refresh context.\n\n"
 		helpText += "Fix Keywords\n"
 		helpText += "------------\n"
 		helpText += "  fix       Request code fix\n"
@@ -2656,6 +2668,22 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		}
 	}
 
+	// Handle /rescan command — invalidate cache and rebuild project context (Req 7.1, 7.2, 7.3)
+	if trimmedMsg == "/rescan" {
+		a.projectCtxCache.Invalidate(a.config.WorkspaceDir)
+		builder := projectctx.NewContextBuilder()
+		meta, err := builder.Build(a.config.WorkspaceDir)
+		if err != nil {
+			a.aiPane.DisplayNotification("⚠️ Rescan failed: " + err.Error())
+			return nil
+		}
+		a.projectCtxCache.Put(a.config.WorkspaceDir, meta)
+		notification := fmt.Sprintf("🔄 Project rescan complete: %d files discovered, %d key project files found.",
+			meta.TotalFiles, len(meta.KeyFiles))
+		a.aiPane.DisplayNotification(notification)
+		return nil
+	}
+
 	// Step 2: Determine if this is a fix request upfront
 	cleanMessage := message
 	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(message)), "/preview") {
@@ -2708,6 +2736,42 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 				AltResults:   altResults,
 			}
 		}
+	}
+
+	// Project query classification — inject project context for project-level questions
+	// (Req 3.1, 3.4, 3.5, 4.1, 4.2, 4.3, 4.4, 4.5, 5.1, 5.2, 5.3)
+	classifier := projectctx.NewQueryClassifier()
+	classification := classifier.Classify(cleanMessage)
+
+	if classification.NeedsProjectContext {
+		// Get or build project metadata from cache
+		meta := a.projectCtxCache.Get(a.config.WorkspaceDir)
+		if meta == nil {
+			builder := projectctx.NewContextBuilder()
+			var buildErr error
+			meta, buildErr = builder.Build(a.config.WorkspaceDir)
+			if buildErr != nil {
+				// Fall through to existing conversational path on error
+				a.aiPane.DisplayNotification("⚠️ Project context build failed: " + buildErr.Error())
+				return a.aiPane.SendMessage(message, fileContent)
+			}
+			a.projectCtxCache.Put(a.config.WorkspaceDir, meta)
+		}
+
+		// Optional: search integration for search-like questions
+		var searchResults []string
+		if len(classification.SearchTerms) > 0 {
+			exactResults, _, _ := a.fileManager.SearchFilesContent(classification.SearchTerms)
+			searchResults = exactResults
+		}
+
+		// Build augmented prompt with project context
+		promptBuilder := projectctx.NewPromptBuilder()
+		augmentedPrompt := promptBuilder.Build(meta, message, searchResults, fileContent)
+
+		// Send through existing streaming path — display user's original message,
+		// but send the augmented prompt to the AI (Req 4.5: don't expose injected context)
+		return a.aiPane.SendMessage(augmentedPrompt, "")
 	}
 
 	isFixDetection := a.agenticFixer.IsFixRequest(cleanMessage)
