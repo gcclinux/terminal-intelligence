@@ -28,7 +28,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"github.com/user/terminal-intelligence/internal/agentic"
 	"github.com/user/terminal-intelligence/internal/ai"
-	"github.com/user/terminal-intelligence/internal/projectctx"
 	"github.com/user/terminal-intelligence/internal/bedrock"
 	"github.com/user/terminal-intelligence/internal/config"
 	"github.com/user/terminal-intelligence/internal/filemanager"
@@ -36,6 +35,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/git"
 	"github.com/user/terminal-intelligence/internal/installer"
 	"github.com/user/terminal-intelligence/internal/ollama"
+	"github.com/user/terminal-intelligence/internal/projectctx"
 	"github.com/user/terminal-intelligence/internal/types"
 )
 
@@ -58,51 +58,51 @@ import (
 //
 // The App implements the Bubble Tea Model interface (Init, Update, View).
 type App struct {
-	config                    *types.AppConfig           // Application configuration
-	editorPane                *EditorPane                // Left pane: code editor
-	aiPane                    *AIChatPane                // Right pane: AI chat
-	gitPane                   *GitPane                   // Git operations popup overlay
-	fileManager               *filemanager.FileManager   // File system operations
-	aiClient                  ai.AIClient                // AI service client (Ollama or Gemini)
-	agenticFixer              *agentic.AgenticCodeFixer  // Autonomous code fixing orchestrator
-	projectFixer              *agentic.ProjectFixer      // Project-wide agentic fixer
+	config                    *types.AppConfig             // Application configuration
+	editorPane                *EditorPane                  // Left pane: code editor
+	aiPane                    *AIChatPane                  // Right pane: AI chat
+	gitPane                   *GitPane                     // Git operations popup overlay
+	fileManager               *filemanager.FileManager     // File system operations
+	aiClient                  ai.AIClient                  // AI service client (Ollama or Gemini)
+	agenticFixer              *agentic.AgenticCodeFixer    // Autonomous code fixing orchestrator
+	projectFixer              *agentic.ProjectFixer        // Project-wide agentic fixer
 	agenticProjectFixer       *agentic.AgenticProjectFixer // Project-wide agentic fixer with retry loop
-	autonomousCreator         *agentic.AutonomousCreator // Autonomous application builder
-	activePane                types.PaneType             // Currently focused pane
-	width                     int                        // Terminal width
-	height                    int                        // Terminal height
-	ready                     bool                       // Whether initial sizing is complete
-	showExitConfirmation      bool                       // Whether exit confirmation dialog is showing
-	showFilePrompt            bool                       // Whether file creation prompt is showing
-	showFilePicker            bool                       // Whether file picker dialog is showing
-	showFolderPicker          bool                       // Whether folder picker dialog is showing
-	showFolderCreatePrompt    bool                       // Whether folder creation prompt is showing
-	showBackupPicker          bool                       // Whether backup picker dialog is showing
-	showChatLoader            bool                       // Whether chat loader dialog is showing
-	showHelp                  bool                       // Whether help dialog is showing
-	showLanguageInstallPrompt bool                       // Whether language install prompt is showing
-	languageToInstall         string                     // Language name for installation prompt
-	fileTypeForInstall        string                     // File type that triggered install check
-	filePromptBuffer          string                     // Buffer for file name input
-	folderCreateBuffer        string                     // Buffer for new folder name input
-	fileList                  []string                   // List of files for picker
-	folderList                []string                   // List of folders for picker
-	backupList                []string                   // List of backups for picker
-	chatList                  []string                   // List of saved chats for loader
-	filePickerIndex           int                        // Selected index in file picker
-	filePickerPath            string                     // Current path being browsed in file picker
-	folderPickerIndex         int                        // Selected index in folder picker
-	folderPickerPath          string                     // Current path being browsed in folder picker
-	forceQuit                 bool                       // Whether to quit without save confirmation
-	statusMessage             string                     // Status bar message
-	pendingCodeInsert         string                     // Code waiting to be inserted after file creation
-	buildNumber               string                     // Build number from git commits
-	searchResults             []string                   // Files found in last search
-	searchResultIndex         int                        // Current index in searchResults
-	searchTerms               []string                   // Last search terms used
-	lastPreviewRequest        string                     // Original /project request from the last preview run
-	autonomousFileToOpen      string                     // File path to open after autonomous creation step
-	projectCtxCache           *projectctx.ContextCache   // Cache for project context metadata
+	autonomousCreator         *agentic.AutonomousCreator   // Autonomous application builder
+	activePane                types.PaneType               // Currently focused pane
+	width                     int                          // Terminal width
+	height                    int                          // Terminal height
+	ready                     bool                         // Whether initial sizing is complete
+	showExitConfirmation      bool                         // Whether exit confirmation dialog is showing
+	showFilePrompt            bool                         // Whether file creation prompt is showing
+	showFilePicker            bool                         // Whether file picker dialog is showing
+	showFolderPicker          bool                         // Whether folder picker dialog is showing
+	showFolderCreatePrompt    bool                         // Whether folder creation prompt is showing
+	showBackupPicker          bool                         // Whether backup picker dialog is showing
+	showChatLoader            bool                         // Whether chat loader dialog is showing
+	showHelp                  bool                         // Whether help dialog is showing
+	showLanguageInstallPrompt bool                         // Whether language install prompt is showing
+	languageToInstall         string                       // Language name for installation prompt
+	fileTypeForInstall        string                       // File type that triggered install check
+	filePromptBuffer          string                       // Buffer for file name input
+	folderCreateBuffer        string                       // Buffer for new folder name input
+	fileList                  []string                     // List of files for picker
+	folderList                []string                     // List of folders for picker
+	backupList                []string                     // List of backups for picker
+	chatList                  []string                     // List of saved chats for loader
+	filePickerIndex           int                          // Selected index in file picker
+	filePickerPath            string                       // Current path being browsed in file picker
+	folderPickerIndex         int                          // Selected index in folder picker
+	folderPickerPath          string                       // Current path being browsed in folder picker
+	forceQuit                 bool                         // Whether to quit without save confirmation
+	statusMessage             string                       // Status bar message
+	pendingCodeInsert         string                       // Code waiting to be inserted after file creation
+	buildNumber               string                       // Build number from git commits
+	searchResults             []string                     // Files found in last search
+	searchResultIndex         int                          // Current index in searchResults
+	searchTerms               []string                     // Last search terms used
+	lastPreviewRequest        string                       // Original /project request from the last preview run
+	autonomousFileToOpen      string                       // File path to open after autonomous creation step
+	projectCtxCache           *projectctx.ContextCache     // Cache for project context metadata
 }
 
 // New creates a new application instance with the provided configuration.
@@ -170,9 +170,13 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	// Initialize ProjectFixer
 	projectFixer := agentic.NewProjectFixer(aiClient, config.DefaultModel)
 
-	// Initialize AgenticProjectFixer with a no-op logger (final result displayed via message)
+	// Initialize AgenticProjectFixer with a placeholder logger.
+	// The real notify function is wired up after the App struct is created (see below).
+	var fixNotify func(string)
 	fixLogger := agentic.NewActionLogger(func(msg string) {
-		// no-op: notifications are displayed via FixSessionCompleteMsg
+		if fixNotify != nil {
+			fixNotify(msg)
+		}
 	})
 	agenticProjectFixer := agentic.NewAgenticProjectFixer(aiClient, config.DefaultModel, fixLogger)
 
@@ -180,7 +184,7 @@ func New(config *types.AppConfig, buildNumber string) *App {
 	gitClient := git.NewClient(config.WorkspaceDir)
 	gitPane := NewGitPane(gitClient, config.WorkspaceDir)
 
-	return &App{
+	app := &App{
 		config:               config,
 		fileManager:          fm,
 		aiClient:             aiClient,
@@ -201,6 +205,13 @@ func New(config *types.AppConfig, buildNumber string) *App {
 		searchTerms:          []string{},
 		projectCtxCache:      projectctx.NewContextCache(),
 	}
+
+	// Wire up the fix logger now that the App (and its aiPane) exist.
+	fixNotify = func(msg string) {
+		app.aiPane.DisplayNotification(msg)
+	}
+
+	return app
 }
 
 // Init initializes the application and returns initial command.
@@ -644,7 +655,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.autonomousFileToOpen != "" {
 			filePath := a.autonomousFileToOpen
 			a.autonomousFileToOpen = "" // Clear it after capturing
-			
+
 			// Open the file directly in the editor pane
 			err := a.editorPane.LoadFile(filePath)
 			if err != nil {
@@ -852,7 +863,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Create new folder
 				if a.folderCreateBuffer != "" {
 					newFolderPath := filepath.Join(a.folderPickerPath, a.folderCreateBuffer)
-					
+
 					// Check if folder already exists
 					if _, err := os.Stat(newFolderPath); err == nil {
 						a.statusMessage = "Folder already exists: " + a.folderCreateBuffer
@@ -862,7 +873,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							a.statusMessage = "Error creating folder: " + err.Error()
 						} else {
 							a.statusMessage = "Created folder: " + a.folderCreateBuffer
-							
+
 							// Refresh folder list to show the new folder
 							dirs, err := a.fileManager.ListDirectories(a.folderPickerPath)
 							if err != nil {
@@ -2663,7 +2674,10 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		a.aiPane.streaming = true
 
 		return func() tea.Msg {
-			result, err := a.agenticProjectFixer.ProcessFixCommand(request, nil)
+			statusCallback := func(phase string) {
+				a.aiPane.DisplayNotification(fmt.Sprintf("🔧 Fix phase: %s", phase))
+			}
+			result, err := a.agenticProjectFixer.ProcessFixCommand(request, statusCallback)
 			return FixSessionCompleteMsg{Result: result, Error: err}
 		}
 	}

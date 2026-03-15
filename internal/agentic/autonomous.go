@@ -322,7 +322,62 @@ Assume we are already inside the project directory.`, c.Plan, pythonExample)
 		os.Remove(scriptPath)
 
 		if err != nil {
-			return "", fmt.Errorf("%sdependency setup failed: %v\nOutput:\n%s", execLog, err, string(out))
+			errorOutput := string(out)
+			failedCmd := cmdsStr
+			if c.logger != nil {
+				c.logger.Log("Dependency setup failed: %v", err)
+				c.logger.Log("Output: %s", errorOutput)
+				c.logger.Log("Attempting fallback fix for dependency error...")
+			}
+
+			// Try fallback fix before aborting
+			result2, fixErr := c.fallbackFix(errorOutput, "dependency", failedCmd)
+			if fixErr != nil {
+				return "", fmt.Errorf("%sdependency setup failed after fallback fix: %v\nOriginal output:\n%s", execLog, fixErr, errorOutput)
+			}
+			if result2 != nil && result2.Success {
+				if c.logger != nil {
+					c.logger.Log("Fallback fix resolved dependency issue after %d attempts", result2.TotalAttempts)
+				}
+				// Retry the dependency setup after fix
+				if c.logger != nil {
+					c.logger.Log("Retrying dependency setup after successful fix...")
+				}
+				retryScriptPath := filepath.Join(c.ProjectDir, "setup_retry.sh")
+				if runtime.GOOS == "windows" {
+					retryScriptPath = filepath.Join(c.ProjectDir, "setup_retry.bat")
+				}
+				retryContent := cmdsStr
+				if runtime.GOOS != "windows" && !strings.HasPrefix(cmdsStr, "#!") {
+					retryContent = "#!/bin/bash\n" + cmdsStr
+				}
+				if writeErr := os.WriteFile(retryScriptPath, []byte(retryContent), 0755); writeErr == nil {
+					var retryOut []byte
+					var retryErr error
+					if runtime.GOOS == "windows" {
+						retryCmd := exec.Command("cmd", "/C", "setup_retry.bat")
+						retryCmd.Dir = c.ProjectDir
+						retryOut, retryErr = retryCmd.CombinedOutput()
+					} else {
+						retryOut, retryErr, _ = runScriptWithFallback(retryScriptPath, c.ProjectDir)
+					}
+					os.Remove(retryScriptPath)
+					if retryErr != nil {
+						return "", fmt.Errorf("%sdependency setup failed on retry: %v\nOutput:\n%s", execLog, retryErr, string(retryOut))
+					}
+					if c.logger != nil {
+						c.logger.Log("Dependency setup succeeded on retry after fix")
+					}
+				} else {
+					return "", fmt.Errorf("%sdependency setup failed: could not write retry script: %v", execLog, writeErr)
+				}
+			} else {
+				errMsg := "fix was unsuccessful"
+				if result2 != nil {
+					errMsg = result2.ErrorMessage
+				}
+				return "", fmt.Errorf("%sdependency setup failed: %v (%s)\nOutput:\n%s", execLog, err, errMsg, errorOutput)
+			}
 		}
 	}
 

@@ -141,7 +141,6 @@ func (apf *AgenticProjectFixer) buildAgenticPrompt(
 	return sb.String()
 }
 
-
 // ProcessFixCommand is the single entry point called by AIChatPane for /fix commands.
 // It orchestrates the full agentic loop: scan → rank → snapshot → fix → test → retry.
 //
@@ -341,6 +340,14 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 
 		// (f) Parse response into file sections.
 		fileSections := splitOnFileHeaders(aiResponse)
+		apf.logger.Log("Attempt %d: AI proposed changes to %d file(s)", attempt, len(fileSections))
+
+		// Log a brief summary of what the AI is trying to do (first 200 chars of response).
+		responseSummary := strings.TrimSpace(aiResponse)
+		if len(responseSummary) > 200 {
+			responseSummary = responseSummary[:200] + "..."
+		}
+		apf.logger.Log("Attempt %d: AI strategy summary: %s", attempt, responseSummary)
 
 		// Resolve project root for path operations.
 		absRoot, _ := filepath.Abs(request.ProjectRoot)
@@ -358,8 +365,10 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 			filePath = strings.TrimSpace(filePath)
 			patches := parseSearchReplace(patchText)
 			if len(patches) == 0 {
+				apf.logger.Log("Attempt %d: no valid patches found for file: %s", attempt, filePath)
 				continue
 			}
+			apf.logger.Log("Attempt %d: applying %d patch(es) to %s", attempt, len(patches), filePath)
 
 			// Resolve the file path.
 			absP := filePath
@@ -377,6 +386,7 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 			// Read current file content.
 			content, _, readErr := readUpToNLines(absP, 2000)
 			if readErr != nil {
+				apf.logger.Log("Attempt %d: could not read file %s: %s", attempt, filePath, readErr.Error())
 				failures = append(failures, PatchFailure{Path: filePath, Reason: readErr.Error()})
 				continue
 			}
@@ -401,6 +411,7 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 					newContent, applyErr = applySearchReplace(currentContent, patch.search, patch.replace)
 				}
 				if applyErr != nil {
+					apf.logger.Log("Attempt %d: patch failed on %s: %s", attempt, filePath, applyErr.Error())
 					failures = append(failures, PatchFailure{Path: filePath, Reason: applyErr.Error()})
 					applyFailed = true
 					break
@@ -444,6 +455,19 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 		}
 
 		lastModified = modified
+
+		// Log summary of patch application results.
+		if len(failures) > 0 {
+			apf.logger.Log("Attempt %d: %d patch failure(s) encountered", attempt, len(failures))
+			for _, f := range failures {
+				apf.logger.Log("  Patch failure: %s — %s", f.Path, f.Reason)
+			}
+		}
+		if len(modified) == 0 && len(failures) > 0 {
+			apf.logger.Log("Attempt %d: no files were successfully modified — all patches failed", attempt)
+		} else if len(modified) > 0 {
+			apf.logger.Log("Attempt %d: successfully modified %d file(s)", attempt, len(modified))
+		}
 
 		// (h) Detect language and get test command (Req 9.4).
 		modifiedPaths := make([]string, len(modified))
@@ -493,8 +517,22 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 			break
 		}
 
-		// (l) Tests failed.
+		// (l) Tests failed — log details so the user can see what went wrong.
 		apf.logger.Log("Attempt %d: tests failed (exit code %d)", attempt, testResult.ExitCode)
+		if testResult.Stderr != "" {
+			stderrSnippet := testResult.Stderr
+			if len(stderrSnippet) > 500 {
+				stderrSnippet = stderrSnippet[:500] + "...(truncated)"
+			}
+			apf.logger.Log("Attempt %d: stderr: %s", attempt, stderrSnippet)
+		}
+		if testResult.Stdout != "" {
+			stdoutSnippet := testResult.Stdout
+			if len(stdoutSnippet) > 500 {
+				stdoutSnippet = stdoutSnippet[:500] + "...(truncated)"
+			}
+			apf.logger.Log("Attempt %d: stdout: %s", attempt, stdoutSnippet)
+		}
 		session.AttemptInCycle++
 
 		// (m) Check for reset cycle (Req 5.1).
