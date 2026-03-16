@@ -15,7 +15,7 @@ import (
 	"github.com/user/terminal-intelligence/internal/ai"
 )
 
-var projectNameRe = regexp.MustCompile(`(?im)project\s*name\s*[:\-]?\s*` + "`?" + `([a-z0-9\-_]+)` + "`?")
+var projectNameRe = regexp.MustCompile(`(?im)project\s*name\s*[:\-]?\s*` + `\**` + "`?" + `([a-zA-Z0-9\-_]+)` + "`?" + `\**`)
 
 // CreatorState represents the current state of the Autonomous Creator state machine.
 type CreatorState int
@@ -174,11 +174,12 @@ The user wants to create a new application from scratch with the following descr
 "%s"
 
 Please provide an implementation plan. Include:
-1. A suggested project name (very short, lowercase, hyphenated).
+1. A project name. If the user specified a name, use that exact name. Otherwise suggest a short, lowercase, hyphenated name.
 2. A high-level architecture overview.
 3. The specific files and folder structure that will be created.
 4. The commands needed to initialize dependencies (e.g. go mod init, pip install).
-5. The command to run the application to test it.`, c.Description)
+5. The command to run the application to test it.
+IMPORTANT: Use the programming language the user requested. If no language is specified, choose the most appropriate one.`, c.Description)
 
 	plan, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
@@ -269,7 +270,8 @@ func (c *AutonomousCreator) doDependencies() (string, error) {
 
 What are the precise terminal commands to initialize the project dependencies?
 Return ONLY a script with the commands. No markdown formatting, no explanations. Just the raw commands.
-Example for Go: go mod init my-app && go mod tidy
+Example for Go: go mod tidy
+Do NOT include "go mod init" if a go.mod file already exists in the project.
 %s
 Assume we are already inside the project directory.`, c.Plan, pythonExample)
 
@@ -281,6 +283,13 @@ Assume we are already inside the project directory.`, c.Plan, pythonExample)
 	cmdsStr = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(cmdsStr, "```"), "```bash"))
 	cmdsStr = strings.TrimSpace(strings.TrimPrefix(cmdsStr, "```sh"))
 	cmdsStr = strings.TrimSpace(strings.TrimPrefix(cmdsStr, "```"))
+
+	// If go.mod already exists (created during file generation), strip "go mod init"
+	// commands to avoid "go.mod already exists" errors.
+	goModPath := filepath.Join(c.ProjectDir, "go.mod")
+	if _, statErr := os.Stat(goModPath); statErr == nil {
+		cmdsStr = stripGoModInit(cmdsStr)
+	}
 
 	if cmdsStr != "" {
 		// On Windows, convert Unix-style commands to Windows-compatible ones
@@ -480,238 +489,104 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 	return fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n\nMoving to install dependencies...", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")), nil
 }
 
+
 func (c *AutonomousCreator) doTesting() (string, error) {
-	// Detect project type from created files
-	projectType := c.detectProjectType()
+	codeCtx := c.buildCodeContext()
 
-	// Build context-aware prompt
-	prompt := fmt.Sprintf(`Given the implementation plan:
+	// Ask the AI to analyze the actual code and tell us how to verify it
+	prompt := fmt.Sprintf(`You are an expert software engineer. A project was just generated with this plan:
 %s
 
-The following files were created:
+Here are the actual files and their contents:
 %s
 
-Project type detected: %s
+Analyze the code and answer these questions in EXACTLY this format (one answer per line, no extra text):
+BUILD_CMD: <single shell command to compile/build the project, or NONE if not needed>
+TEST_CMD: <single shell command to run tests or verify the build, or NONE if no tests>
+IS_SERVER: <YES or NO - does this application start a long-running HTTP server?>
+RUN_CMD: <single shell command to start the application, or NONE>
+PORT: <port number the server listens on, or NONE>
 
-Please provide a single terminal command to run the main tests or build the project.
-For Go projects, use: go build or go test ./...
-For Python projects, use: python -m pytest or python main.py
-For shell/bash projects, use: bash main.sh or shellcheck *.sh
-For PowerShell projects, use: powershell -File main.ps1
+Rules:
+- Base your answers on the ACTUAL CODE, not assumptions.
+- For Go projects the build command is typically "go build -o <name>" and run is "./<name>".
+- For Python projects use the appropriate python/python3 command.
+- Do NOT wrap commands in markdown. Return raw commands only.
+- Assume we are already inside the project directory.`, c.Plan, codeCtx)
 
-IMPORTANT: Only return commands for supported project types (Go, Python, Bash, PowerShell).
-Do NOT return npm, yarn, or node commands as they are not yet supported.
-Return ONLY this single bash command, no formatting, no markdown.`,
-		c.Plan,
-		strings.Join(getFileList(c.FilesToMake), ", "),
-		projectType)
-
-	cmdStr, err := aicall(c.AIClient, c.Model, prompt)
+	analysis, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
 		return "", err
 	}
-	cmdStr = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(cmdStr, "```"), "```bash"))
-	cmdStr = strings.TrimSpace(strings.TrimPrefix(cmdStr, "```sh"))
-	cmdStr = strings.TrimSpace(strings.TrimPrefix(cmdStr, "```"))
 
-	if cmdStr != "" {
-		// For Python projects, prefer the venv python over the system one
-		if projectType == "Python" {
-			venvPy := detectVenvPython(c.ProjectDir)
-			cmdStr = strings.ReplaceAll(cmdStr, "python3 ", venvPy+" ")
-			cmdStr = strings.ReplaceAll(cmdStr, "python ", venvPy+" ")
-			// handle trailing "python3" or "python" with no trailing space (end of string)
-			if cmdStr == "python3" || cmdStr == "python" {
-				cmdStr = venvPy
-			}
+	buildCmd := extractAIField(analysis, "BUILD_CMD")
+	testCmd := extractAIField(analysis, "TEST_CMD")
+	isServer := strings.EqualFold(extractAIField(analysis, "IS_SERVER"), "YES")
+	runCmd := extractAIField(analysis, "RUN_CMD")
+	port := extractAIField(analysis, "PORT")
+	if port == "" || strings.EqualFold(port, "NONE") {
+		port = "8080"
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
+
+	// Step 1: Build if needed
+	if buildCmd != "" && !strings.EqualFold(buildCmd, "NONE") {
+		result.WriteString(fmt.Sprintf("Building: %s\n", buildCmd))
+		if c.logger != nil {
+			c.logger.Log("Building: %s", buildCmd)
 		}
-
-		// Run test/build
-		scriptPath := filepath.Join(c.ProjectDir, "test.sh")
-		if runtime.GOOS == "windows" {
-			scriptPath = filepath.Join(c.ProjectDir, "test.bat")
-		}
-
-		testScriptContent := cmdStr
-		if runtime.GOOS != "windows" && !strings.HasPrefix(cmdStr, "#!") {
-			testScriptContent = "#!/bin/bash\n" + cmdStr
-		}
-		err = os.WriteFile(scriptPath, []byte(testScriptContent), 0755)
-		if err != nil {
-			return "", fmt.Errorf("failed to write test script: %v", err)
-		}
-
-		// Check if this looks like a long-running server command (all platforms)
-		isServer, port := c.detectWebServer()
-		cmdLower := strings.ToLower(cmdStr)
-		looksLikeServer := isServer ||
-			strings.Contains(cmdLower, "app.run") ||
-			strings.Contains(cmdLower, "uvicorn") ||
-			strings.Contains(cmdLower, "flask run") ||
-			strings.Contains(cmdLower, "python server") ||
-			strings.Contains(cmdLower, "python app") ||
-			strings.Contains(cmdLower, "python main")
-
-		if looksLikeServer {
-			os.Remove(scriptPath) // clean up script, run directly
-
-			url := fmt.Sprintf("http://localhost:%s", port)
-
-			// Check if port is available before attempting to start server
-			portAvailable, portErr := isPortAvailable(port)
-			if !portAvailable {
-				var portErrMsg strings.Builder
-				portErrMsg.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
-				portErrMsg.WriteString(fmt.Sprintf("Port %s is not available for binding.\n", port))
-				if portErr != nil {
-					portErrMsg.WriteString(fmt.Sprintf("Error: %v\n\n", portErr))
-				}
-				portErrMsg.WriteString("This could mean:\n")
-				portErrMsg.WriteString("  - Another process is already using this port\n")
-				portErrMsg.WriteString("  - The port is in TIME_WAIT state from a recent connection\n")
-				portErrMsg.WriteString("  - Firewall or system restrictions are blocking the port\n\n")
-				portErrMsg.WriteString(fmt.Sprintf("To check what's using port %s on macOS:\n", port))
-				portErrMsg.WriteString(fmt.Sprintf("  lsof -i :%s\n\n", port))
-				portErrMsg.WriteString("Aborting autonomous creation.")
-				return "", fmt.Errorf("%s", portErrMsg.String())
+		out, buildErr := c.runShellCmd(buildCmd)
+		if buildErr != nil {
+			fixResult, fixErr := c.aiDrivenFix(buildCmd, string(out), "build")
+			if fixErr != nil {
+				return result.String(), fmt.Errorf("build failed: %v\nOutput: %s", buildErr, string(out))
 			}
-
-			// Build the server command — prefer venv python for everything
-			pythonBin := detectVenvPython(c.ProjectDir)
-			if pythonBin == "" {
-				pythonBin = "python3"
-			}
-
-			var serverCmd *exec.Cmd
-			var runArgs []string
-			if strings.Contains(cmdLower, "uvicorn") {
-				// Extract the app target from the command (e.g. "main:app")
-				appTarget := "main:app"
-				parts := strings.Fields(cmdStr)
-				for i, p := range parts {
-					if p == "uvicorn" && i+1 < len(parts) {
-						appTarget = parts[i+1]
-						break
-					}
-				}
-				runArgs = []string{"-m", "uvicorn", appTarget, "--port", port}
-			} else {
-				mainFile := c.findMainPythonFile()
-				if mainFile != "" {
-					runArgs = []string{mainFile}
-				}
-			}
-
-			if len(runArgs) > 0 {
-				serverCmd = exec.Command(pythonBin, runArgs...)
-			} else if runtime.GOOS == "windows" {
-				serverCmd = exec.Command("cmd", "/C", cmdStr)
-			} else {
-				serverCmd = exec.Command("bash", "-c", cmdStr)
-			}
-
-			// Print test plan now that we know the exact command
-			testPlan := fmt.Sprintf("ai-assist %s\nRunning smoke tests:\n  1. Start server: %s %s\n  2. Wait up to 30s for server to become ready\n  3. HTTP GET %s (expect 2xx response)\n  4. Kill server and report result\n",
-				getCurrentTime(), pythonBin, strings.Join(runArgs, " "), url)
-			serverCmd.Dir = c.ProjectDir
-			setProcGroupAttr(serverCmd)
-
-			// Capture both stdout and stderr so we can report them on failure
-			var stdoutBuf, stderrBuf strings.Builder
-			serverCmd.Stdout = &stdoutBuf
-			serverCmd.Stderr = &stderrBuf
-
-			startErr := serverCmd.Start()
-			if startErr != nil {
-				return "", fmt.Errorf("failed to start server for testing: %v", startErr)
-			}
-
-			// Poll for HTTP readiness (up to 30s) with progress updates
-			httpReady := false
-			client := &http.Client{Timeout: 2 * time.Second}
-			var progressLog strings.Builder
-			progressLog.WriteString(testPlan)
-			progressLog.WriteString(fmt.Sprintf("ai-assist %s\nServer started (PID %d). Waiting for HTTP response...\n", getCurrentTime(), serverCmd.Process.Pid))
-
-			for i := 0; i < 30; i++ {
-				time.Sleep(1 * time.Second)
-
-				// Log progress every 5 seconds
-				if i > 0 && i%5 == 0 {
-					progressLog.WriteString(fmt.Sprintf("ai-assist %s\nStill waiting... (%d seconds elapsed)\n", getCurrentTime(), i))
-				}
-
-				resp, err := client.Get(url)
-				if err == nil {
-					resp.Body.Close()
-					if resp.StatusCode < 500 {
-						httpReady = true
-						break
-					}
-				}
-			}
-
-			killProcessGroup(serverCmd.Process.Pid)
-			_, _ = serverCmd.Process.Wait()
-
-			if !httpReady {
-				var errorReport strings.Builder
-				errorReport.WriteString(fmt.Sprintf("server started (PID %d) but did not respond at %s within 30 seconds\n\n", serverCmd.Process.Pid, url))
-
-				// Include both stdout and stderr
-				stdoutOutput := strings.TrimSpace(stdoutBuf.String())
-				stderrOutput := strings.TrimSpace(stderrBuf.String())
-
-				if stdoutOutput != "" {
-					errorReport.WriteString("Server stdout:\n")
-					errorReport.WriteString(stdoutOutput)
-					errorReport.WriteString("\n\n")
-				}
-
-				if stderrOutput != "" {
-					errorReport.WriteString("Server stderr:\n")
-					errorReport.WriteString(stderrOutput)
-					errorReport.WriteString("\n\n")
-				}
-
-				if stdoutOutput == "" && stderrOutput == "" {
-					errorReport.WriteString("No output captured from server process.\n")
-					errorReport.WriteString("This may indicate:\n")
-					errorReport.WriteString("  - Server is buffering output\n")
-					errorReport.WriteString("  - Server failed to start silently\n")
-					errorReport.WriteString("  - Port conflict or permission issue\n\n")
-					errorReport.WriteString(fmt.Sprintf("Try manually:\n  cd %s\n  %s %s\n\n", c.ProjectName, pythonBin, strings.Join(runArgs, " ")))
-				}
-
-				errorReport.WriteString("Aborting autonomous creation.")
-				return progressLog.String(), fmt.Errorf("%s", errorReport.String())
-			}
-
-			c.State = StateDocumentation
-			return testPlan + fmt.Sprintf("ai-assist %s\nServer responded at %s — smoke test passed. Process killed.\n\nMoving to documentation...", getCurrentTime(), url), nil
-		}
-
-		var execLog string
-		var out []byte
-		var runErr error
-		if runtime.GOOS == "windows" {
-			cmd := exec.Command("cmd", "/C", "test.bat")
-			cmd.Dir = c.ProjectDir
-			out, runErr = cmd.CombinedOutput()
+			result.WriteString(fixResult)
 		} else {
-			out, runErr, execLog = runScriptWithFallback(scriptPath, c.ProjectDir)
+			result.WriteString("Build successful.\n")
 		}
-		os.Remove(scriptPath)
+	}
 
-		if runErr != nil {
-			// Try to fix the error automatically, passing along the shell attempt log
-			return c.attemptTestFix(projectType, cmdStr, execLog+string(out), runErr)
+	// Step 2: Run tests if available
+	if testCmd != "" && !strings.EqualFold(testCmd, "NONE") {
+		result.WriteString(fmt.Sprintf("Testing: %s\n", testCmd))
+		if c.logger != nil {
+			c.logger.Log("Testing: %s", testCmd)
+		}
+		out, testErr := c.runShellCmd(testCmd)
+		if testErr != nil {
+			fixResult, fixErr := c.aiDrivenFix(testCmd, string(out), "test")
+			if fixErr != nil {
+				result.WriteString(fmt.Sprintf("Tests failed: %v\nOutput: %s\n", testErr, string(out)))
+			} else {
+				result.WriteString(fixResult)
+			}
+		} else {
+			result.WriteString("Tests passed.\n")
+		}
+	}
+
+	// Step 3: Smoke-test the server if it's a web server
+	if isServer && runCmd != "" && !strings.EqualFold(runCmd, "NONE") {
+		smokeResult, smokeErr := c.smokeTestServer(runCmd, port)
+		result.WriteString(smokeResult)
+		if smokeErr != nil {
+			fixResult, fixErr := c.aiDrivenFix(runCmd, smokeErr.Error(), "server startup")
+			if fixErr != nil {
+				result.WriteString(fmt.Sprintf("Server smoke test failed: %v\n", smokeErr))
+			} else {
+				result.WriteString(fixResult)
+			}
 		}
 	}
 
 	c.State = StateDocumentation
-	return fmt.Sprintf("ai-assist %s\nAutomated tests passed.\n\nMoving to documentation...", getCurrentTime()), nil
+	result.WriteString(fmt.Sprintf("\nai-assist %s\nVerification complete. Moving to documentation...\n", getCurrentTime()))
+	return result.String(), nil
 }
+
 
 func (c *AutonomousCreator) doDocumentation() (string, error) {
 	prompt := fmt.Sprintf(`Given the implementation plan:
@@ -745,148 +620,90 @@ Return ONLY the raw markdown content.`, c.Plan)
 	return fmt.Sprintf("ai-assist %s\nSuccessfully generated SUMMARY.md (opened in editor)\n\nMoving to build and run...", getCurrentTime()), nil
 }
 
+
 func (c *AutonomousCreator) doBuildAndRun() (string, error) {
-	projectType := c.detectProjectType()
+	codeCtx := c.buildCodeContext()
+
+	// Ask the AI how to build and run this specific project
+	prompt := fmt.Sprintf(`You are an expert software engineer. A project was generated with this plan:
+%s
+
+Here are the actual files:
+%s
+
+Provide the commands to build and run this application in EXACTLY this format (one per line, no extra text):
+BUILD_CMD: <shell command to build, or NONE>
+RUN_CMD: <shell command to run the application>
+IS_SERVER: <YES or NO - is this a long-running server?>
+PORT: <port number if server, or NONE>
+RUN_INSTRUCTIONS: <one-line human-readable instruction for the user to run it manually>
+
+Rules:
+- Base answers on the ACTUAL CODE.
+- Do NOT wrap commands in markdown.
+- Assume we are already inside the project directory.`, c.Plan, codeCtx)
+
+	analysis, err := aicall(c.AIClient, c.Model, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	buildCmd := extractAIField(analysis, "BUILD_CMD")
+	runCmd := extractAIField(analysis, "RUN_CMD")
+	isServer := strings.EqualFold(extractAIField(analysis, "IS_SERVER"), "YES")
+	port := extractAIField(analysis, "PORT")
+	runInstructions := extractAIField(analysis, "RUN_INSTRUCTIONS")
+	if port == "" || strings.EqualFold(port, "NONE") {
+		port = "8080"
+	}
 
 	var result strings.Builder
 	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
 
-	switch projectType {
-	case "Go":
-		return c.buildAndRunGo()
-	case "Python":
-		return c.buildAndRunPython()
-	case "Bash/Shell":
-		return c.buildAndRunBash()
-	case "PowerShell":
-		return c.buildAndRunPowerShell()
-	default:
-		c.State = StateDone
-		return fmt.Sprintf("ai-assist %s\nProject type '%s' - skipping build and run.\n\nApp Creation complete! Navigate to %s to run your application manually.",
-			getCurrentTime(), projectType, c.ProjectName), nil
-	}
-}
-
-func (c *AutonomousCreator) buildAndRunGo() (string, error) {
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("ai-assist %s\nBuilding Go application...\n", getCurrentTime()))
-
-	// Build the application
-	binaryName := c.ProjectName
-	if runtime.GOOS == "windows" {
-		binaryName += ".exe"
-	}
-
-	buildCmd := exec.Command("go", "build", "-o", binaryName)
-	buildCmd.Dir = c.ProjectDir
-	buildOutput, err := buildCmd.CombinedOutput()
-
-	if err != nil {
-		buildErrOutput := string(buildOutput)
-		buildCmdStr := "go build -o " + binaryName
-
-		result2, fixErr := c.fallbackFix(buildErrOutput, "build", buildCmdStr)
-		if fixErr != nil {
-			return "", fmt.Errorf("build failed after fallback fix: %v (original output: %s)", fixErr, buildErrOutput)
-		}
-		if result2 == nil {
-			// No fixer available, preserve existing error return behavior
-			return "", fmt.Errorf("build failed: %v\nOutput: %s", err, buildErrOutput)
-		}
-		if result2.Success {
-			// Retry build once
-			retryCmd := exec.Command("go", "build", "-o", binaryName)
-			retryCmd.Dir = c.ProjectDir
-			retryOutput, retryErr := retryCmd.CombinedOutput()
-			if retryErr != nil {
-				return "", fmt.Errorf("build still failed after fallback fix: %v\nRetry output: %s\nOriginal output: %s", retryErr, string(retryOutput), buildErrOutput)
+	// Build if needed
+	if buildCmd != "" && !strings.EqualFold(buildCmd, "NONE") {
+		result.WriteString(fmt.Sprintf("Building: %s\n", buildCmd))
+		out, buildErr := c.runShellCmd(buildCmd)
+		if buildErr != nil {
+			fixResult, fixErr := c.aiDrivenFix(buildCmd, string(out), "build")
+			if fixErr != nil {
+				result.WriteString(fmt.Sprintf("Build failed: %s\n", string(out)))
+				result.WriteString(fmt.Sprintf("\nTo build manually: cd %s && %s\n", c.ProjectName, buildCmd))
+				c.State = StateDone
+				result.WriteString("\nApp Creation complete!")
+				return result.String(), nil
 			}
-			// Retry succeeded, continue normally
+			result.WriteString(fixResult)
 		} else {
-			return "", fmt.Errorf("build failed after fallback fix (%s): %s", result2.ErrorMessage, buildErrOutput)
+			result.WriteString("Build successful.\n")
 		}
 	}
 
-	result.WriteString(fmt.Sprintf("Build successful! Binary: %s\n\n", binaryName))
-
-	// Detect if it's a web server by checking the plan and code
-	isWebServer, port := c.detectWebServer()
-
-	if isWebServer {
+	if isServer && runCmd != "" && !strings.EqualFold(runCmd, "NONE") {
 		result.WriteString(fmt.Sprintf("Web server detected (port %s)\n", port))
 		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n\n", port))
-
-		// Start the server in a new terminal window
 		result.WriteString("Starting server in new terminal window...\n")
 
-		// Use absolute path to the binary
-		binaryPath := filepath.Join(c.ProjectDir, binaryName)
-
-		var runCmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			// On Windows, use Start-Process via PowerShell to open a new window
-			runCmd = exec.Command("powershell", "-Command",
-				fmt.Sprintf("Start-Process -FilePath '%s' -WorkingDirectory '%s'", binaryPath, c.ProjectDir))
-		} else {
-			// On Linux/Mac, try different terminal emulators
-			// Try gnome-terminal, xterm, or open (macOS)
-			if _, err := exec.LookPath("gnome-terminal"); err == nil {
-				runCmd = exec.Command("gnome-terminal", "--", binaryPath)
-				runCmd.Dir = c.ProjectDir
-			} else if _, err := exec.LookPath("xterm"); err == nil {
-				runCmd = exec.Command("xterm", "-e", binaryPath)
-				runCmd.Dir = c.ProjectDir
-			} else if runtime.GOOS == "darwin" {
-				// macOS: use 'open' with Terminal.app
-				runCmd = exec.Command("open", "-a", "Terminal", binaryPath)
-			} else {
-				// Fallback: run in background without terminal
-				runCmd = exec.Command(binaryPath)
-				runCmd.Dir = c.ProjectDir
-			}
-		}
-
-		// Start the process (non-blocking)
-		if err := runCmd.Start(); err != nil {
-			result.WriteString(fmt.Sprintf("Warning: Could not open terminal window: %v\n", err))
-			result.WriteString("Trying to start in background...\n")
-
-			// Fallback: start in background
-			bgCmd := exec.Command(binaryPath)
-			bgCmd.Dir = c.ProjectDir
-			if err := bgCmd.Start(); err != nil {
-				result.WriteString(fmt.Sprintf("Error: Could not start server: %v\n", err))
-				result.WriteString(fmt.Sprintf("\nTo start manually: cd %s && ./%s\n", c.ProjectName, binaryName))
-			} else {
-				c.RunningProcess = bgCmd
-				result.WriteString("✓ Server started in background\n\n")
-			}
-		} else {
-			c.RunningProcess = runCmd
+		started := c.launchInTerminal(runCmd)
+		if started {
 			result.WriteString("✓ Server is now running in a new terminal window!\n\n")
+		} else {
+			result.WriteString(fmt.Sprintf("Could not open terminal. To start manually:\n  cd %s\n  %s\n", c.ProjectName, runCmd))
 		}
 
 		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n", port))
-		result.WriteString("   Click the link above to open in your browser\n\n")
-		result.WriteString("Note: Check the new terminal window for server logs.\n")
-		result.WriteString("      Close the terminal window to stop the server.\n")
-	} else {
-		// Run the application and capture output
-		result.WriteString("Running application...\n\n")
-		result.WriteString("--- Application Output ---\n")
-
-		// Use absolute path to the binary
-		binaryPath := filepath.Join(c.ProjectDir, binaryName)
-		runCmd := exec.Command(binaryPath)
-		runCmd.Dir = c.ProjectDir
-		output, err := runCmd.CombinedOutput()
-
-		if err != nil {
-			result.WriteString(fmt.Sprintf("Error: %v\n", err))
+	} else if runCmd != "" && !strings.EqualFold(runCmd, "NONE") {
+		result.WriteString(fmt.Sprintf("Running: %s\n\n--- Application Output ---\n", runCmd))
+		out, runErr := c.runShellCmd(runCmd)
+		if runErr != nil {
+			result.WriteString(fmt.Sprintf("Error: %v\n", runErr))
 		}
-		result.WriteString(string(output))
-		result.WriteString("\n--- End Output ---\n\n")
-		result.WriteString(fmt.Sprintf("To run again: cd %s && ./%s\n", c.ProjectName, binaryName))
+		result.WriteString(string(out))
+		result.WriteString("\n--- End Output ---\n")
+	}
+
+	if runInstructions != "" && !strings.EqualFold(runInstructions, "NONE") {
+		result.WriteString(fmt.Sprintf("\nTo run again: %s\n", runInstructions))
 	}
 
 	c.State = StateDone
@@ -894,167 +711,10 @@ func (c *AutonomousCreator) buildAndRunGo() (string, error) {
 	return result.String(), nil
 }
 
-func (c *AutonomousCreator) buildAndRunPython() (string, error) {
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
 
-	pythonBin := detectVenvPython(c.ProjectDir)
 
-	// Detect if it's a web server
-	isWebServer, port := c.detectWebServer()
 
-	// Build run args — handle uvicorn vs plain python
-	planLower := strings.ToLower(c.Plan)
-	isUvicorn := strings.Contains(planLower, "uvicorn")
-	var runArgs []string
-	var runLabel string
 
-	if isUvicorn {
-		appTarget := "main:app"
-		re := regexp.MustCompile(`uvicorn\s+(\S+:\S+)`)
-		if m := re.FindStringSubmatch(c.Plan); len(m) > 1 {
-			appTarget = m[1]
-		}
-		runArgs = []string{"-m", "uvicorn", appTarget, "--port", port}
-		runLabel = fmt.Sprintf("%s -m uvicorn %s --port %s", pythonBin, appTarget, port)
-	} else {
-		mainFile := c.findMainPythonFile()
-		if mainFile == "" {
-			c.State = StateDone
-			return fmt.Sprintf("ai-assist %s\nCould not find main Python file.\n\nApp Creation complete! Navigate to %s to run your application manually.",
-				getCurrentTime(), c.ProjectName), nil
-		}
-		runArgs = []string{mainFile}
-		runLabel = fmt.Sprintf("%s %s", pythonBin, mainFile)
-	}
-
-	if isWebServer {
-		result.WriteString(fmt.Sprintf("Python web server detected (port %s)\n", port))
-		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n\n", port))
-		result.WriteString("Starting server in new terminal window...\n")
-
-		var runCmd *exec.Cmd
-		if runtime.GOOS == "windows" {
-			// cmd /k keeps the window open so logs are visible after the server exits
-			cmdLine := fmt.Sprintf("%s %s", pythonBin, strings.Join(runArgs, " "))
-			runCmd = exec.Command("cmd", "/c", "start", "cmd", "/k", cmdLine)
-			runCmd.Dir = c.ProjectDir
-		} else if runtime.GOOS == "darwin" {
-			script := fmt.Sprintf("cd '%s' && %s", c.ProjectDir, runLabel)
-			runCmd = exec.Command("osascript", "-e",
-				fmt.Sprintf("tell application \"Terminal\" to do script \"%s\"", script))
-		} else if _, err := exec.LookPath("gnome-terminal"); err == nil {
-			args := append([]string{"--"}, append([]string{pythonBin}, runArgs...)...)
-			runCmd = exec.Command("gnome-terminal", args...)
-			runCmd.Dir = c.ProjectDir
-		} else if _, err := exec.LookPath("xterm"); err == nil {
-			args := append([]string{"-e", pythonBin}, runArgs...)
-			runCmd = exec.Command("xterm", args...)
-			runCmd.Dir = c.ProjectDir
-		} else {
-			runCmd = exec.Command(pythonBin, runArgs...)
-			runCmd.Dir = c.ProjectDir
-		}
-
-		if err := runCmd.Start(); err != nil {
-			result.WriteString(fmt.Sprintf("Warning: Could not open terminal window: %v\n", err))
-			result.WriteString("Starting in background instead...\n")
-			bgCmd := exec.Command(pythonBin, runArgs...)
-			bgCmd.Dir = c.ProjectDir
-			if err := bgCmd.Start(); err != nil {
-				result.WriteString(fmt.Sprintf("Error: Could not start server: %v\n", err))
-				result.WriteString(fmt.Sprintf("\nTo start manually:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
-			} else {
-				c.RunningProcess = bgCmd
-				result.WriteString("✓ Server started in background\n\n")
-			}
-		} else {
-			c.RunningProcess = runCmd
-			result.WriteString("✓ Server is now running in a new terminal window!\n\n")
-		}
-
-		result.WriteString(fmt.Sprintf("🌐 Application URL: http://localhost:%s\n", port))
-		result.WriteString("   Click the link above to open in your browser\n\n")
-		result.WriteString(fmt.Sprintf("To start manually:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
-		result.WriteString("Close the terminal window to stop the server.\n")
-	} else {
-		result.WriteString("Running Python application...\n\n--- Application Output ---\n")
-		runCmd := exec.Command(pythonBin, runArgs...)
-		runCmd.Dir = c.ProjectDir
-		output, err := runCmd.CombinedOutput()
-		if err != nil {
-			result.WriteString(fmt.Sprintf("Error: %v\n", err))
-		}
-		result.WriteString(string(output))
-		result.WriteString(fmt.Sprintf("\n--- End Output ---\n\nTo run again:\n  cd %s\n  %s\n", c.ProjectName, runLabel))
-	}
-
-	c.State = StateDone
-	result.WriteString("\nApp Creation complete!")
-	return result.String(), nil
-}
-
-func (c *AutonomousCreator) buildAndRunBash() (string, error) {
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
-
-	// Find the main shell script
-	mainFile := c.findMainShellFile()
-	if mainFile == "" {
-		c.State = StateDone
-		return fmt.Sprintf("ai-assist %s\nCould not find main shell script.\n\nApp Creation complete! Navigate to %s to run your application manually.",
-			getCurrentTime(), c.ProjectName), nil
-	}
-
-	result.WriteString("Running shell script...\n\n")
-	result.WriteString("--- Application Output ---\n")
-
-	runCmd := exec.Command("bash", mainFile)
-	runCmd.Dir = c.ProjectDir
-	output, err := runCmd.CombinedOutput()
-
-	if err != nil {
-		result.WriteString(fmt.Sprintf("Error: %v\n", err))
-	}
-	result.WriteString(string(output))
-	result.WriteString("\n--- End Output ---\n\n")
-	result.WriteString(fmt.Sprintf("To run again: cd %s && bash %s\n", c.ProjectName, mainFile))
-
-	c.State = StateDone
-	result.WriteString("\nApp Creation complete!")
-	return result.String(), nil
-}
-
-func (c *AutonomousCreator) buildAndRunPowerShell() (string, error) {
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("ai-assist %s\n", getCurrentTime()))
-
-	// Find the main PowerShell script
-	mainFile := c.findMainPowerShellFile()
-	if mainFile == "" {
-		c.State = StateDone
-		return fmt.Sprintf("ai-assist %s\nCould not find main PowerShell script.\n\nApp Creation complete! Navigate to %s to run your application manually.",
-			getCurrentTime(), c.ProjectName), nil
-	}
-
-	result.WriteString("Running PowerShell script...\n\n")
-	result.WriteString("--- Application Output ---\n")
-
-	runCmd := exec.Command("powershell", "-File", mainFile)
-	runCmd.Dir = c.ProjectDir
-	output, err := runCmd.CombinedOutput()
-
-	if err != nil {
-		result.WriteString(fmt.Sprintf("Error: %v\n", err))
-	}
-	result.WriteString(string(output))
-	result.WriteString("\n--- End Output ---\n\n")
-	result.WriteString(fmt.Sprintf("To run again: cd %s && powershell -File %s\n", c.ProjectName, mainFile))
-
-	c.State = StateDone
-	result.WriteString("\nApp Creation complete!")
-	return result.String(), nil
-}
 
 // runScriptWithFallback runs a shell script, trying bash first then sh as fallback.
 // It returns the combined output, any error, and a log string describing what was attempted.
@@ -1099,34 +759,39 @@ func aicall(client ai.AIClient, model, prompt string) (string, error) {
 }
 
 func extractProjectName(plan string) string {
-	// Try the standard "Project Name:" format first
+	// Try the standard "Project Name:" format first (handles **bold**, `backtick`, or plain)
 	matches := projectNameRe.FindStringSubmatch(plan)
 	if len(matches) >= 2 && matches[1] != "" {
 		name := strings.TrimSpace(matches[1])
-		// Remove backticks if present
 		name = strings.Trim(name, "`")
-		return name
+		name = strings.Trim(name, "*")
+		return strings.ToLower(name)
+	}
+
+	// Try to find project name in bold markdown on its own line: **project-name**
+	boldRe := regexp.MustCompile(`(?m)\*\*([a-zA-Z0-9][a-zA-Z0-9\-_]*)\*\*`)
+	boldMatches := boldRe.FindAllStringSubmatch(plan, -1)
+	if len(boldMatches) > 0 && len(boldMatches[0]) >= 2 {
+		return strings.ToLower(boldMatches[0][1])
 	}
 
 	// Try to find project name in backticks on its own line
-	// Pattern: `project-name` on a line by itself or after "Project Name"
-	backticksRe := regexp.MustCompile("(?m)`([a-z0-9][a-z0-9\\-_]*)`")
+	backticksRe := regexp.MustCompile("(?m)`([a-zA-Z0-9][a-zA-Z0-9\\-_]*)`")
 	backticksMatches := backticksRe.FindAllStringSubmatch(plan, -1)
 
 	// Look for the first backtick-enclosed name that looks like a project name
 	for _, match := range backticksMatches {
 		if len(match) >= 2 {
 			name := match[1]
-			// Check if it looks like a project name (contains hyphens or underscores)
 			if strings.Contains(name, "-") || strings.Contains(name, "_") {
-				return name
+				return strings.ToLower(name)
 			}
 		}
 	}
 
 	// If we found any backtick name, use the first one
 	if len(backticksMatches) > 0 && len(backticksMatches[0]) >= 2 {
-		return backticksMatches[0][1]
+		return strings.ToLower(backticksMatches[0][1])
 	}
 
 	return "autonomous-app"
@@ -1230,67 +895,30 @@ func (c *AutonomousCreator) detectWebServer() (bool, string) {
 	return true, port
 }
 
-// findMainPythonFile finds the main Python file to run
-func (c *AutonomousCreator) findMainPythonFile() string {
-	// Priority order: main.py, app.py, server.py, any .py file
-	priorities := []string{"main.py", "app.py", "server.py", "run.py"}
 
-	for _, priority := range priorities {
-		if _, exists := c.FilesToMake[priority]; exists {
-			return priority
+
+
+// stripGoModInit removes "go mod init ..." segments from a command string
+// when go.mod was already generated during file creation. It handles both
+// chained commands (&&) and standalone lines, preserving the rest of the script.
+func stripGoModInit(cmds string) string {
+	var cleaned []string
+	for _, line := range strings.Split(cmds, "\n") {
+		// Handle && chains within a single line
+		parts := strings.Split(line, "&&")
+		var kept []string
+		for _, p := range parts {
+			trimmed := strings.TrimSpace(p)
+			if strings.HasPrefix(trimmed, "go mod init") {
+				continue
+			}
+			kept = append(kept, p)
+		}
+		if len(kept) > 0 {
+			cleaned = append(cleaned, strings.Join(kept, "&&"))
 		}
 	}
-
-	// Return first .py file found
-	for filename := range c.FilesToMake {
-		if strings.HasSuffix(filename, ".py") {
-			return filename
-		}
-	}
-
-	return ""
-}
-
-// findMainShellFile finds the main shell script to run
-func (c *AutonomousCreator) findMainShellFile() string {
-	// Priority order: main.sh, run.sh, start.sh, any .sh file
-	priorities := []string{"main.sh", "run.sh", "start.sh", "script.sh"}
-
-	for _, priority := range priorities {
-		if _, exists := c.FilesToMake[priority]; exists {
-			return priority
-		}
-	}
-
-	// Return first .sh file found
-	for filename := range c.FilesToMake {
-		if strings.HasSuffix(filename, ".sh") {
-			return filename
-		}
-	}
-
-	return ""
-}
-
-// findMainPowerShellFile finds the main PowerShell script to run
-func (c *AutonomousCreator) findMainPowerShellFile() string {
-	// Priority order: main.ps1, run.ps1, start.ps1, any .ps1 file
-	priorities := []string{"main.ps1", "run.ps1", "start.ps1", "script.ps1"}
-
-	for _, priority := range priorities {
-		if _, exists := c.FilesToMake[priority]; exists {
-			return priority
-		}
-	}
-
-	// Return first .ps1 file found
-	for filename := range c.FilesToMake {
-		if strings.HasSuffix(filename, ".ps1") {
-			return filename
-		}
-	}
-
-	return ""
+	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
 // runGoModTidy runs go mod tidy to download dependencies
@@ -1315,81 +943,288 @@ func isPortAvailable(port string) (bool, error) {
 	return true, nil
 }
 
-// attemptTestFix tries to automatically fix test failures
-func (c *AutonomousCreator) attemptTestFix(projectType, testCmd, output string, testErr error) (string, error) {
-	var result strings.Builder
-	result.WriteString(fmt.Sprintf("ai-assist %s\nTest failed. Attempting automatic fix...\n\n", getCurrentTime()))
-	result.WriteString(fmt.Sprintf("Error: %v\n", testErr))
-	result.WriteString(fmt.Sprintf("Output:\n%s\n\n", output))
-
-	// Check for common Go dependency issues
-	if projectType == "Go" && strings.Contains(output, "missing go.sum entry") {
-		result.WriteString("Detected missing dependencies. Running 'go mod tidy'...\n")
-
-		if err := c.runGoModTidy(); err != nil {
-			return "", fmt.Errorf("automatic fix failed: %v", err)
-		}
-
-		result.WriteString("Dependencies resolved. Retrying test...\n\n")
-
-		// Retry the test
-		scriptPath := filepath.Join(c.ProjectDir, "test.sh")
-		if runtime.GOOS == "windows" {
-			scriptPath = filepath.Join(c.ProjectDir, "test.bat")
-		}
-
-		retryScriptContent := testCmd
-		if runtime.GOOS != "windows" && !strings.HasPrefix(testCmd, "#!") {
-			retryScriptContent = "#!/bin/bash\n" + testCmd
-		}
-		err := os.WriteFile(scriptPath, []byte(retryScriptContent), 0755)
-		if err != nil {
-			return "", fmt.Errorf("failed to write retry test script: %v", err)
-		}
-
-		var retryExecLog string
-		var retryOut []byte
-		var retryErr error
-		if runtime.GOOS == "windows" {
-			cmd := exec.Command("cmd", "/C", "test.bat")
-			cmd.Dir = c.ProjectDir
-			retryOut, retryErr = cmd.CombinedOutput()
-		} else {
-			retryOut, retryErr, retryExecLog = runScriptWithFallback(scriptPath, c.ProjectDir)
-		}
-		os.Remove(scriptPath)
-
-		if retryErr != nil {
-			result.WriteString(retryExecLog)
-			result.WriteString(fmt.Sprintf("Retry failed: %v\n", retryErr))
-			result.WriteString(fmt.Sprintf("Output:\n%s\n\n", string(retryOut)))
-			return "", fmt.Errorf("automated test failed after fix attempt:\n%s", result.String())
-		}
-
-		result.WriteString("✓ Test passed after automatic fix!\n\n")
-		c.State = StateDocumentation
-		return result.String() + fmt.Sprintf("ai-assist %s\nMoving to documentation...", getCurrentTime()), nil
-	}
-
-	// For other errors, try fallback fix before aborting
-	errorOutput := output
-	result2, err := c.fallbackFix(errorOutput, "test", testCmd)
-	if err != nil {
-		return "", fmt.Errorf("test failures could not be resolved after fallback fix: %v (original error: %s)", err, errorOutput)
-	}
-	if result2 == nil {
-		// No fixer available, preserve existing abort behavior
-		return "", fmt.Errorf("test failures could not be resolved: %s", errorOutput)
-	}
-	if result2.Success {
-		c.State = StateDocumentation
-		return fmt.Sprintf("Tests fixed by fallback fixer after %d attempts", result2.TotalAttempts), nil
-	}
-	// Fix was unsuccessful
-	return "", fmt.Errorf("test failures could not be resolved after fallback fix (%s): %s", result2.ErrorMessage, errorOutput)
+// cleanAIResponse strips markdown code fences from AI responses.
+func cleanAIResponse(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.TrimPrefix(s, "```bash")
+	s = strings.TrimPrefix(s, "```sh")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	return strings.TrimSpace(s)
 }
 
-// detectPythonBinary tries to find the correct Python binary on the system
+// extractAIField extracts a value from a structured AI response like "FIELD: value".
+func extractAIField(response, field string) string {
+	prefix := field + ":"
+	for _, line := range strings.Split(response, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(strings.ToUpper(trimmed), strings.ToUpper(prefix)) {
+			val := strings.TrimSpace(trimmed[len(prefix):])
+			val = cleanAIResponse(val)
+			return val
+		}
+	}
+	return ""
+}
+
+// buildCodeContext creates a string representation of all generated files and their
+// contents so the AI can inspect the actual code when deciding what to do.
+func (c *AutonomousCreator) buildCodeContext() string {
+	var sb strings.Builder
+	for path, content := range c.FilesToMake {
+		sb.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", path, content))
+	}
+	return sb.String()
+}
+
+// runShellCmd executes a shell command in the project directory and returns output.
+func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("cmd", "/C", cmdStr)
+	} else {
+		cmd = exec.Command("bash", "-c", cmdStr)
+	}
+	cmd.Dir = c.ProjectDir
+	return cmd.CombinedOutput()
+}
+
+// aiDrivenFix asks the AI to analyze an error, fix the code, and retry the command.
+// It performs up to 3 fix attempts. Returns a log of what happened or an error if
+// all attempts fail.
+func (c *AutonomousCreator) aiDrivenFix(failedCmd, errorOutput, context string) (string, error) {
+	codeCtx := c.buildCodeContext()
+	var result strings.Builder
+	maxAttempts := 3
+
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		if c.logger != nil {
+			c.logger.Log("Fix attempt %d/%d for %s error", attempt, maxAttempts, context)
+		}
+		result.WriteString(fmt.Sprintf("ai-assist %s\nFix attempt %d/%d for %s error...\n", getCurrentTime(), attempt, maxAttempts, context))
+
+		// Ask AI to diagnose and fix
+		prompt := fmt.Sprintf(`A %s error occurred while running: %s
+
+Error output:
+%s
+
+Here are the project files:
+%s
+
+Analyze the error and provide fixes. Return your response in EXACTLY this format:
+
+For each file that needs changing:
+FIX_FILE: <relative path>
+FIX_CONTENT: <complete new file content>
+END_FIX
+
+After all fixes:
+RETRY_CMD: <the command to retry, or SAME to reuse the original>
+
+If the error cannot be fixed by changing code (e.g. missing system tool), return:
+UNFIXABLE: <explanation>
+
+Rules:
+- Provide the COMPLETE file content, not just the changed lines.
+- Do NOT wrap content in markdown code fences.
+- Base fixes on the actual error message and code.`, context, failedCmd, errorOutput, codeCtx)
+
+		fixResponse, err := aicall(c.AIClient, c.Model, prompt)
+		if err != nil {
+			return result.String(), fmt.Errorf("AI fix call failed: %v", err)
+		}
+
+		// Check if unfixable
+		if unfixable := extractAIField(fixResponse, "UNFIXABLE"); unfixable != "" {
+			return result.String(), fmt.Errorf("AI determined error is unfixable: %s", unfixable)
+		}
+
+		// Apply fixes
+		fixesApplied := 0
+		lines := strings.Split(fixResponse, "\n")
+		for i := 0; i < len(lines); i++ {
+			trimmed := strings.TrimSpace(lines[i])
+			if strings.HasPrefix(trimmed, "FIX_FILE:") {
+				filePath := strings.TrimSpace(trimmed[len("FIX_FILE:"):])
+				// Collect content until END_FIX
+				var content strings.Builder
+				inContent := false
+				for i++; i < len(lines); i++ {
+					if strings.TrimSpace(lines[i]) == "END_FIX" {
+						break
+					}
+					if !inContent && strings.HasPrefix(strings.TrimSpace(lines[i]), "FIX_CONTENT:") {
+						// First line of content might be on the same line as FIX_CONTENT:
+						firstLine := strings.TrimSpace(lines[i][len("FIX_CONTENT:"):])
+						if firstLine != "" {
+							content.WriteString(firstLine)
+							content.WriteString("\n")
+						}
+						inContent = true
+						continue
+					}
+					if inContent {
+						content.WriteString(lines[i])
+						content.WriteString("\n")
+					}
+				}
+				if filePath != "" && content.Len() > 0 {
+					absPath := filepath.Join(c.ProjectDir, filePath)
+					os.MkdirAll(filepath.Dir(absPath), 0755)
+					cleanContent := cleanAIResponse(content.String())
+					if err := os.WriteFile(absPath, []byte(cleanContent), 0644); err == nil {
+						c.FilesToMake[filePath] = cleanContent
+						fixesApplied++
+						result.WriteString(fmt.Sprintf("Fixed: %s\n", filePath))
+					}
+				}
+			}
+		}
+
+		if fixesApplied == 0 {
+			// Try the fallback fixer if available
+			if c.fixer != nil {
+				result2, fixErr := c.fallbackFix(errorOutput, context, failedCmd)
+				if fixErr == nil && result2 != nil && result2.Success {
+					result.WriteString("Fallback fixer resolved the issue.\n")
+				}
+			}
+		}
+
+		// Retry the command
+		retryCmd := extractAIField(fixResponse, "RETRY_CMD")
+		if retryCmd == "" || strings.EqualFold(retryCmd, "SAME") {
+			retryCmd = failedCmd
+		}
+		retryCmd = cleanAIResponse(retryCmd)
+
+		out, retryErr := c.runShellCmd(retryCmd)
+		if retryErr == nil {
+			result.WriteString(fmt.Sprintf("✓ %s succeeded after fix.\n", context))
+			return result.String(), nil
+		}
+		errorOutput = string(out) // feed new error into next attempt
+		result.WriteString(fmt.Sprintf("Retry failed: %s\n", string(out)))
+	}
+
+	return result.String(), fmt.Errorf("%s failed after %d fix attempts", context, maxAttempts)
+}
+
+// smokeTestServer starts a server command, waits for it to respond on the given port,
+// then kills it. Returns a log and nil on success, or an error if the server didn't respond.
+func (c *AutonomousCreator) smokeTestServer(runCmd, port string) (string, error) {
+	url := fmt.Sprintf("http://localhost:%s", port)
+
+	// Check port availability
+	portAvailable, _ := isPortAvailable(port)
+	if !portAvailable {
+		return "", fmt.Errorf("port %s is not available", port)
+	}
+
+	var serverCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		serverCmd = exec.Command("cmd", "/C", runCmd)
+	} else {
+		serverCmd = exec.Command("bash", "-c", runCmd)
+	}
+	serverCmd.Dir = c.ProjectDir
+	setProcGroupAttr(serverCmd)
+
+	var stdoutBuf, stderrBuf strings.Builder
+	serverCmd.Stdout = &stdoutBuf
+	serverCmd.Stderr = &stderrBuf
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("ai-assist %s\nSmoke testing server: %s\n", getCurrentTime(), runCmd))
+	result.WriteString(fmt.Sprintf("Expecting response at %s\n", url))
+
+	if err := serverCmd.Start(); err != nil {
+		return result.String(), fmt.Errorf("failed to start server: %v", err)
+	}
+
+	result.WriteString(fmt.Sprintf("Server started (PID %d). Waiting for HTTP response...\n", serverCmd.Process.Pid))
+
+	httpReady := false
+	client := &http.Client{Timeout: 2 * time.Second}
+	for i := 0; i < 30; i++ {
+		time.Sleep(1 * time.Second)
+		if i > 0 && i%5 == 0 {
+			result.WriteString(fmt.Sprintf("Still waiting... (%d seconds)\n", i))
+		}
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode < 500 {
+				httpReady = true
+				break
+			}
+		}
+	}
+
+	killProcessGroup(serverCmd.Process.Pid)
+	serverCmd.Process.Wait()
+
+	if !httpReady {
+		errMsg := fmt.Sprintf("server did not respond at %s within 30 seconds", url)
+		stdout := strings.TrimSpace(stdoutBuf.String())
+		stderr := strings.TrimSpace(stderrBuf.String())
+		if stdout != "" {
+			errMsg += "\nstdout: " + stdout
+		}
+		if stderr != "" {
+			errMsg += "\nstderr: " + stderr
+		}
+		return result.String(), fmt.Errorf("%s", errMsg)
+	}
+
+	result.WriteString(fmt.Sprintf("✓ Server responded at %s — smoke test passed.\n", url))
+	return result.String(), nil
+}
+
+// launchInTerminal attempts to start a command in a new terminal window.
+// Returns true if successful.
+func (c *AutonomousCreator) launchInTerminal(cmdStr string) bool {
+	var runCmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		runCmd = exec.Command("cmd", "/c", "start", "cmd", "/k", cmdStr)
+		runCmd.Dir = c.ProjectDir
+	} else if runtime.GOOS == "darwin" {
+		script := fmt.Sprintf("cd '%s' && %s", c.ProjectDir, cmdStr)
+		runCmd = exec.Command("osascript", "-e",
+			fmt.Sprintf("tell application \"Terminal\" to do script \"%s\"", script))
+	} else if _, err := exec.LookPath("gnome-terminal"); err == nil {
+		runCmd = exec.Command("gnome-terminal", "--", "bash", "-c", cmdStr)
+		runCmd.Dir = c.ProjectDir
+	} else if _, err := exec.LookPath("xterm"); err == nil {
+		runCmd = exec.Command("xterm", "-e", "bash", "-c", cmdStr)
+		runCmd.Dir = c.ProjectDir
+	} else {
+		// Fallback: run in background
+		bgCmd := exec.Command("bash", "-c", cmdStr)
+		bgCmd.Dir = c.ProjectDir
+		if err := bgCmd.Start(); err != nil {
+			return false
+		}
+		c.RunningProcess = bgCmd
+		return true
+	}
+
+	if err := runCmd.Start(); err != nil {
+		// Fallback to background
+		bgCmd := exec.Command("bash", "-c", cmdStr)
+		bgCmd.Dir = c.ProjectDir
+		if err := bgCmd.Start(); err != nil {
+			return false
+		}
+		c.RunningProcess = bgCmd
+		return true
+	}
+	c.RunningProcess = runCmd
+	return true
+}
+
+
 // Returns "python" or "python3" depending on what's available, or empty string if neither found
 func detectPythonBinary() string {
 	// Try python first (common on Windows)
