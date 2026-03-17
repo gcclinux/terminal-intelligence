@@ -174,12 +174,17 @@ The user wants to create a new application from scratch with the following descr
 "%s"
 
 Please provide an implementation plan. Include:
-1. A project name. If the user specified a name, use that exact name. Otherwise suggest a short, lowercase, hyphenated name.
+1. A project name. If the user specified a name, use that EXACT name as-is. Otherwise suggest a short, lowercase, hyphenated name.
 2. A high-level architecture overview.
-3. The specific files and folder structure that will be created.
+3. The COMPLETE files and folder structure that will be created. List EVERY file with its full relative path from the project root (e.g. "backend/main.go", "frontend/index.html", "frontend/styles.css"). If the application has multiple components (frontend, backend, API, etc.), organize them into separate folders.
 4. The commands needed to initialize dependencies (e.g. go mod init, pip install).
 5. The command to run the application to test it.
-IMPORTANT: Use the programming language the user requested. If no language is specified, choose the most appropriate one.`, c.Description)
+
+IMPORTANT RULES:
+- Use the programming language the user requested. If no language is specified, choose the most appropriate one.
+- If the user asks for a web application, you MUST include both frontend AND backend folders with complete implementations.
+- List every single file that will be created — do not summarize with "..." or "etc".
+- The project name MUST appear as "Project Name: <name>" on its own line.`, c.Description)
 
 	plan, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
@@ -395,23 +400,34 @@ Assume we are already inside the project directory.`, c.Plan, pythonExample)
 }
 
 func (c *AutonomousCreator) doFileCreation() (string, error) {
-	prompt := fmt.Sprintf(`Given the implementation plan:
+	prompt := fmt.Sprintf(`You are an expert autonomous software engineer.
+Given the implementation plan below, generate ALL the necessary code files for this project.
+
+IMPLEMENTATION PLAN:
 %s
 
-Generate all the necessary code files for this project.
+CRITICAL RULES:
+1. You MUST create EVERY file and folder described in the plan above. Do not skip any.
+2. If the plan specifies a frontend folder, you MUST generate frontend files inside that folder.
+3. If the plan specifies a backend folder, you MUST generate backend files inside that folder.
+4. All file paths must be RELATIVE to the project root (e.g. "backend/main.go", "frontend/index.html").
+5. Do NOT prefix paths with the project name — files are placed inside the project directory automatically.
+6. Generate complete, working code — not stubs or placeholders.
+7. Follow the EXACT folder structure from the plan.
+
 Return the files inside standard Markdown code blocks with the relative filepath specified immediately before the code block.
 
-Example:
-**main.go**
+Example format:
+**backend/main.go**
 `+"```go"+`
 package main
-// ...
+// full implementation ...
 `+"```"+`
 
-**utils/helper.go**
-`+"```go"+`
-package utils
-// ...
+**frontend/index.html**
+`+"```html"+`
+<!DOCTYPE html>
+<!-- full implementation ... -->
 `+"```"+`
 
 Only return the file paths and code blocks. No other text.`, c.Plan)
@@ -421,7 +437,45 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 		return "", err
 	}
 
-	// Simple parser for "**path/to/file.ext**\n```lang\ncontent\n```"
+	c.FilesToMake = c.parseFileBlocks(response)
+
+	// Write files to disk
+	createdFiles := c.writeFilesToDisk()
+
+	// Validate structure against the plan and ask AI to fill gaps
+	missingResult, err := c.validateAndFillStructure(createdFiles)
+	if err != nil {
+		// Non-fatal: log but continue
+		if c.logger != nil {
+			c.logger.Log("Structure validation warning: %v", err)
+		}
+	}
+	if missingResult != "" {
+		createdFiles = c.getFileList()
+	}
+
+	// Post-creation dependency resolution for Go projects
+	projectType := c.detectProjectType()
+	if projectType == "Go" {
+		if err := c.runGoModTidy(); err != nil {
+			return "", fmt.Errorf("failed to run go mod tidy: %v", err)
+		}
+	}
+
+	var resultMsg strings.Builder
+	resultMsg.WriteString(fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")))
+	if missingResult != "" {
+		resultMsg.WriteString(missingResult)
+	}
+	resultMsg.WriteString("\nMoving to install dependencies...")
+
+	c.State = StateDependencies
+	return resultMsg.String(), nil
+}
+
+// parseFileBlocks parses the AI response for "**path/to/file.ext**\n```lang\ncontent\n```" blocks.
+func (c *AutonomousCreator) parseFileBlocks(response string) map[string]string {
+	files := make(map[string]string)
 	lines := strings.Split(response, "\n")
 	var currentFile string
 	var currentContent strings.Builder
@@ -432,7 +486,12 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 
 		// Check for file name
 		if !inBlock && strings.HasPrefix(trimmed, "**") && strings.HasSuffix(trimmed, "**") {
-			currentFile = strings.Trim(trimmed, "*")
+			currentFile = strings.Trim(trimmed, "* ")
+			// Strip leading project name prefix if the AI accidentally included it
+			// e.g. "ricardo/backend/main.go" -> "backend/main.go"
+			if c.ProjectName != "" && strings.HasPrefix(currentFile, c.ProjectName+"/") {
+				currentFile = strings.TrimPrefix(currentFile, c.ProjectName+"/")
+			}
 			continue
 		}
 
@@ -440,7 +499,7 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 			if inBlock {
 				// End of block
 				if currentFile != "" {
-					c.FilesToMake[currentFile] = currentContent.String()
+					files[currentFile] = currentContent.String()
 				}
 				currentFile = ""
 				currentContent.Reset()
@@ -456,37 +515,106 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 			currentContent.WriteString(line + "\n")
 		}
 	}
+	return files
+}
 
-	// Write files to disk
+// writeFilesToDisk writes all files in FilesToMake to the project directory.
+func (c *AutonomousCreator) writeFilesToDisk() []string {
 	createdFiles := []string{}
 	for relPath, content := range c.FilesToMake {
 		// Port 5000 is blocked on Windows (firewall) and macOS Monterey+ (AirPlay).
-		// Rewrite it to 8080 in all generated files.
 		content = strings.ReplaceAll(content, "port=5000", "port=8080")
 		content = strings.ReplaceAll(content, "port = 5000", "port = 8080")
 		content = strings.ReplaceAll(content, ":5000", ":8080")
 		c.FilesToMake[relPath] = content
 
 		absPath := filepath.Join(c.ProjectDir, relPath)
-		// Ensure parent dirs exist
 		os.MkdirAll(filepath.Dir(absPath), 0755)
 
 		if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
-			return "", fmt.Errorf("failed to write %s: %v", relPath, err)
+			if c.logger != nil {
+				c.logger.Log("Failed to write %s: %v", relPath, err)
+			}
+			continue
 		}
 		createdFiles = append(createdFiles, relPath)
 	}
+	return createdFiles
+}
 
-	// Post-creation dependency resolution for Go projects
-	projectType := c.detectProjectType()
-	if projectType == "Go" {
-		if err := c.runGoModTidy(); err != nil {
-			return "", fmt.Errorf("failed to run go mod tidy: %v", err)
-		}
+// getFileList returns a sorted list of all file paths in FilesToMake.
+func (c *AutonomousCreator) getFileList() []string {
+	list := make([]string, 0, len(c.FilesToMake))
+	for f := range c.FilesToMake {
+		list = append(list, f)
+	}
+	return list
+}
+
+// validateAndFillStructure asks the AI to compare the generated files against the plan
+// and generates any missing files. Returns a status message and error.
+func (c *AutonomousCreator) validateAndFillStructure(createdFiles []string) (string, error) {
+	fileList := strings.Join(createdFiles, "\n")
+
+	prompt := fmt.Sprintf(`You are an expert software engineer validating a project structure.
+
+IMPLEMENTATION PLAN:
+%s
+
+FILES ACTUALLY CREATED:
+%s
+
+Compare the plan against the files that were created. Identify ANY files or folders that the plan describes but are MISSING from the created list.
+
+If ALL files from the plan are present, respond with exactly:
+STRUCTURE_OK
+
+If files are missing, generate the missing files. Return them in this format:
+
+MISSING_FILES:
+**<relative-path>**
+`+"```<lang>"+`
+<complete file content>
+`+"```"+`
+
+Only output STRUCTURE_OK or the missing files. No other text.`, c.Plan, fileList)
+
+	response, err := aicall(c.AIClient, c.Model, prompt)
+	if err != nil {
+		return "", err
 	}
 
-	c.State = StateDependencies
-	return fmt.Sprintf("ai-assist %s\nGenerated and saved %d files:\n- %s\n\nMoving to install dependencies...", getCurrentTime(), len(createdFiles), strings.Join(createdFiles, "\n- ")), nil
+	trimmed := strings.TrimSpace(response)
+	if strings.HasPrefix(trimmed, "STRUCTURE_OK") {
+		return "", nil
+	}
+
+	// Parse and write missing files
+	missingFiles := c.parseFileBlocks(response)
+	if len(missingFiles) == 0 {
+		return "", nil
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("\nai-assist %s\nStructure validation found %d missing files — generating them now:\n", getCurrentTime(), len(missingFiles)))
+
+	for relPath, content := range missingFiles {
+		content = strings.ReplaceAll(content, ":5000", ":8080")
+		c.FilesToMake[relPath] = content
+
+		absPath := filepath.Join(c.ProjectDir, relPath)
+		os.MkdirAll(filepath.Dir(absPath), 0755)
+
+		if err := os.WriteFile(absPath, []byte(content), 0644); err != nil {
+			if c.logger != nil {
+				c.logger.Log("Failed to write missing file %s: %v", relPath, err)
+			}
+			continue
+		}
+		result.WriteString(fmt.Sprintf("- %s\n", relPath))
+	}
+
+	return result.String(), nil
 }
 
 
@@ -977,6 +1105,25 @@ func (c *AutonomousCreator) buildCodeContext() string {
 	return sb.String()
 }
 
+// buildCodeContextFromDisk re-reads all known project files from disk so the AI
+// sees the latest state (including any fixes applied by the fallback fixer).
+func (c *AutonomousCreator) buildCodeContextFromDisk() string {
+	var sb strings.Builder
+	for relPath := range c.FilesToMake {
+		absPath := filepath.Join(c.ProjectDir, relPath)
+		data, err := os.ReadFile(absPath)
+		if err != nil {
+			// Fall back to in-memory content
+			sb.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", relPath, c.FilesToMake[relPath]))
+			continue
+		}
+		content := string(data)
+		c.FilesToMake[relPath] = content // update in-memory map
+		sb.WriteString(fmt.Sprintf("--- %s ---\n%s\n\n", relPath, content))
+	}
+	return sb.String()
+}
+
 // runShellCmd executes a shell command in the project directory and returns output.
 func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
 	var cmd *exec.Cmd
@@ -993,26 +1140,29 @@ func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
 // It performs up to 3 fix attempts. Returns a log of what happened or an error if
 // all attempts fail.
 func (c *AutonomousCreator) aiDrivenFix(failedCmd, errorOutput, context string) (string, error) {
-	codeCtx := c.buildCodeContext()
 	var result strings.Builder
 	maxAttempts := 3
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		// Re-read files from disk each attempt so we have the latest state
+		codeCtx := c.buildCodeContextFromDisk()
+
 		if c.logger != nil {
 			c.logger.Log("Fix attempt %d/%d for %s error", attempt, maxAttempts, context)
 		}
 		result.WriteString(fmt.Sprintf("ai-assist %s\nFix attempt %d/%d for %s error...\n", getCurrentTime(), attempt, maxAttempts, context))
 
 		// Ask AI to diagnose and fix
-		prompt := fmt.Sprintf(`A %s error occurred while running: %s
+		prompt := fmt.Sprintf(`You are an expert software engineer debugging a project.
+A %s error occurred while running: %s
 
 Error output:
 %s
 
-Here are the project files:
+Here are the current project files:
 %s
 
-Analyze the error and provide fixes. Return your response in EXACTLY this format:
+Analyze the error carefully and provide fixes. Return your response in EXACTLY this format:
 
 For each file that needs changing:
 FIX_FILE: <relative path>
@@ -1028,7 +1178,8 @@ UNFIXABLE: <explanation>
 Rules:
 - Provide the COMPLETE file content, not just the changed lines.
 - Do NOT wrap content in markdown code fences.
-- Base fixes on the actual error message and code.`, context, failedCmd, errorOutput, codeCtx)
+- Base fixes on the actual error message and code.
+- If the error is about missing files or wrong paths, create the correct files.`, context, failedCmd, errorOutput, codeCtx)
 
 		fixResponse, err := aicall(c.AIClient, c.Model, prompt)
 		if err != nil {
