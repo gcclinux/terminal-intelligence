@@ -249,155 +249,82 @@ func (c *AutonomousCreator) doSetup() (string, error) {
 	return message, nil
 }
 
+
 func (c *AutonomousCreator) doDependencies() (string, error) {
-	// Detect Python binary if this is a Python project
-	pythonBinary := detectPythonBinary()
+	codeCtx := c.buildCodeContext()
+	sysCtx := getSystemContext()
 
-	// Build platform-appropriate examples
-	var pythonExample string
-	if runtime.GOOS == "windows" {
-		if pythonBinary != "" {
-			pythonExample = fmt.Sprintf("Example for Python: %s -m venv venv && venv\\Scripts\\activate && pip install fastapi uvicorn", pythonBinary)
-		} else {
-			pythonExample = "Example for Python: python -m venv venv && venv\\Scripts\\activate && pip install fastapi uvicorn"
-		}
-	} else {
-		if pythonBinary != "" {
-			pythonExample = fmt.Sprintf("Example for Python: %s -m venv venv && source venv/bin/activate && pip install fastapi uvicorn", pythonBinary)
-		} else {
-			pythonExample = "Example for Python: python3 -m venv venv && source venv/bin/activate && pip install fastapi uvicorn"
-		}
-	}
+	// Ask the AI for the dependency setup commands, giving it full system context
+	prompt := fmt.Sprintf(`You are an expert software engineer setting up a new project.
 
-	// Ask AI for the specific setup shell commands required.
-	prompt := fmt.Sprintf(`Given the implementation plan:
+Implementation plan:
 %s
 
-What are the precise terminal commands to initialize the project dependencies?
-Return ONLY a script with the commands. No markdown formatting, no explanations. Just the raw commands.
-Example for Go: go mod tidy
-Do NOT include "go mod init" if a go.mod file already exists in the project.
+Generated files:
 %s
-Assume we are already inside the project directory.`, c.Plan, pythonExample)
+
+System environment:
+%s
+
+What are the precise terminal commands to install this project's dependencies?
+Return ONLY a shell script with the commands. No markdown formatting, no explanations.
+
+Rules:
+- Base your answer on the ACTUAL FILES and the system environment.
+- If the system has PEP 668 (externally-managed-environment), you MUST create a virtual environment first.
+- For Go projects: do NOT include "go mod init" if go.mod already exists. Just use "go mod tidy".
+- For Python projects on PEP 668 systems: use "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt" (adjust paths as needed).
+- Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
 	cmdsStr, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
 		return "", err
 	}
 
-	cmdsStr = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(cmdsStr, "```"), "```bash"))
-	cmdsStr = strings.TrimSpace(strings.TrimPrefix(cmdsStr, "```sh"))
-	cmdsStr = strings.TrimSpace(strings.TrimPrefix(cmdsStr, "```"))
+	cmdsStr = cleanAIResponse(cmdsStr)
 
-	// If go.mod already exists (created during file generation), strip "go mod init"
-	// commands to avoid "go.mod already exists" errors.
+	// Safety: strip "go mod init" if go.mod already exists
 	goModPath := filepath.Join(c.ProjectDir, "go.mod")
 	if _, statErr := os.Stat(goModPath); statErr == nil {
 		cmdsStr = stripGoModInit(cmdsStr)
 	}
 
-	if cmdsStr != "" {
-		// On Windows, convert Unix-style commands to Windows-compatible ones
-		if runtime.GOOS == "windows" {
-			cmdsStr = convertToWindowsCommands(cmdsStr, pythonBinary)
+	if cmdsStr == "" {
+		c.State = StateTesting
+		return fmt.Sprintf("ai-assist %s\nNo dependencies to install.\n\nMoving to testing...", getCurrentTime()), nil
+	}
+
+	if c.logger != nil {
+		c.logger.Log("Installing dependencies: %s", cmdsStr)
+	}
+
+	// Execute the dependency commands
+	out, cmdErr := c.runShellCmd(cmdsStr)
+	if cmdErr != nil {
+		errorOutput := string(out)
+		if c.logger != nil {
+			c.logger.Log("Dependency setup failed: %v", cmdErr)
+			c.logger.Log("Output: %s", errorOutput)
 		}
 
-		// Prepare a shell script to execute
-		scriptPath := filepath.Join(c.ProjectDir, "setup.sh")
-		if runtime.GOOS == "windows" {
-			scriptPath = filepath.Join(c.ProjectDir, "setup.bat")
+		// Use AI-driven fix to resolve the dependency error
+		fixResult, fixErr := c.aiDrivenFix(cmdsStr, errorOutput, "dependency setup")
+		if fixErr != nil {
+			return "", fmt.Errorf("dependency setup failed: %v\nOutput:\n%s", fixErr, errorOutput)
 		}
 
-		scriptContent := cmdsStr
-		if runtime.GOOS != "windows" {
-			if !strings.HasPrefix(cmdsStr, "#!") {
-				scriptContent = "#!/bin/bash\n" + cmdsStr
-			}
-			// Inject pip bootstrap so the script installs pip when missing
-			scriptContent = injectPipBootstrap(scriptContent)
+		// aiDrivenFix succeeded
+		if c.logger != nil {
+			c.logger.Log("Dependency setup resolved by AI fix")
 		}
-		err = os.WriteFile(scriptPath, []byte(scriptContent), 0755)
-		if err != nil {
-			return "", fmt.Errorf("failed to write setup script: %v", err)
-		}
-
-		// Execute it
-		var execLog string
-		var out []byte
-		if runtime.GOOS == "windows" {
-			cmd := exec.Command("cmd", "/C", "setup.bat")
-			cmd.Dir = c.ProjectDir
-			out, err = cmd.CombinedOutput()
-		} else {
-			out, err, execLog = runScriptWithFallback(scriptPath, c.ProjectDir)
-		}
-
-		// Optional cleanup
-		os.Remove(scriptPath)
-
-		if err != nil {
-			errorOutput := string(out)
-			failedCmd := cmdsStr
-			if c.logger != nil {
-				c.logger.Log("Dependency setup failed: %v", err)
-				c.logger.Log("Output: %s", errorOutput)
-				c.logger.Log("Attempting fallback fix for dependency error...")
-			}
-
-			// Try fallback fix before aborting
-			result2, fixErr := c.fallbackFix(errorOutput, "dependency", failedCmd)
-			if fixErr != nil {
-				return "", fmt.Errorf("%sdependency setup failed after fallback fix: %v\nOriginal output:\n%s", execLog, fixErr, errorOutput)
-			}
-			if result2 != nil && result2.Success {
-				if c.logger != nil {
-					c.logger.Log("Fallback fix resolved dependency issue after %d attempts", result2.TotalAttempts)
-				}
-				// Retry the dependency setup after fix
-				if c.logger != nil {
-					c.logger.Log("Retrying dependency setup after successful fix...")
-				}
-				retryScriptPath := filepath.Join(c.ProjectDir, "setup_retry.sh")
-				if runtime.GOOS == "windows" {
-					retryScriptPath = filepath.Join(c.ProjectDir, "setup_retry.bat")
-				}
-				retryContent := cmdsStr
-				if runtime.GOOS != "windows" && !strings.HasPrefix(cmdsStr, "#!") {
-					retryContent = "#!/bin/bash\n" + cmdsStr
-				}
-				if writeErr := os.WriteFile(retryScriptPath, []byte(retryContent), 0755); writeErr == nil {
-					var retryOut []byte
-					var retryErr error
-					if runtime.GOOS == "windows" {
-						retryCmd := exec.Command("cmd", "/C", "setup_retry.bat")
-						retryCmd.Dir = c.ProjectDir
-						retryOut, retryErr = retryCmd.CombinedOutput()
-					} else {
-						retryOut, retryErr, _ = runScriptWithFallback(retryScriptPath, c.ProjectDir)
-					}
-					os.Remove(retryScriptPath)
-					if retryErr != nil {
-						return "", fmt.Errorf("%sdependency setup failed on retry: %v\nOutput:\n%s", execLog, retryErr, string(retryOut))
-					}
-					if c.logger != nil {
-						c.logger.Log("Dependency setup succeeded on retry after fix")
-					}
-				} else {
-					return "", fmt.Errorf("%sdependency setup failed: could not write retry script: %v", execLog, writeErr)
-				}
-			} else {
-				errMsg := "fix was unsuccessful"
-				if result2 != nil {
-					errMsg = result2.ErrorMessage
-				}
-				return "", fmt.Errorf("%sdependency setup failed: %v (%s)\nOutput:\n%s", execLog, err, errMsg, errorOutput)
-			}
-		}
+		c.State = StateTesting
+		return fmt.Sprintf("ai-assist %s\n%s\nDependencies installed after fix.\n\nMoving to testing...", getCurrentTime(), fixResult), nil
 	}
 
 	c.State = StateTesting
 	return fmt.Sprintf("ai-assist %s\nDependencies installed successfully.\n\nMoving to testing...", getCurrentTime()), nil
 }
+
 
 func (c *AutonomousCreator) doFileCreation() (string, error) {
 	prompt := fmt.Sprintf(`You are an expert autonomous software engineer.
@@ -452,14 +379,6 @@ Only return the file paths and code blocks. No other text.`, c.Plan)
 	}
 	if missingResult != "" {
 		createdFiles = c.getFileList()
-	}
-
-	// Post-creation dependency resolution for Go projects
-	projectType := c.detectProjectType()
-	if projectType == "Go" {
-		if err := c.runGoModTidy(); err != nil {
-			return "", fmt.Errorf("failed to run go mod tidy: %v", err)
-		}
 	}
 
 	var resultMsg strings.Builder
@@ -620,12 +539,16 @@ Only output STRUCTURE_OK or the missing files. No other text.`, c.Plan, fileList
 
 func (c *AutonomousCreator) doTesting() (string, error) {
 	codeCtx := c.buildCodeContext()
+	sysCtx := getSystemContext()
 
 	// Ask the AI to analyze the actual code and tell us how to verify it
 	prompt := fmt.Sprintf(`You are an expert software engineer. A project was just generated with this plan:
 %s
 
 Here are the actual files and their contents:
+%s
+
+System environment:
 %s
 
 Analyze the code and answer these questions in EXACTLY this format (one answer per line, no extra text):
@@ -636,11 +559,12 @@ RUN_CMD: <single shell command to start the application, or NONE>
 PORT: <port number the server listens on, or NONE>
 
 Rules:
-- Base your answers on the ACTUAL CODE, not assumptions.
+- Base your answers on the ACTUAL CODE and system environment, not assumptions.
 - For Go projects the build command is typically "go build -o <name>" and run is "./<name>".
-- For Python projects use the appropriate python/python3 command.
+- For Python projects: if a venv directory exists, use venv/bin/python and venv/bin/pip. Otherwise use python3.
+- If the system has PEP 668, commands MUST use the venv python (e.g. venv/bin/python, venv/bin/uvicorn).
 - Do NOT wrap commands in markdown. Return raw commands only.
-- Assume we are already inside the project directory.`, c.Plan, codeCtx)
+- Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
 	analysis, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
@@ -751,12 +675,16 @@ Return ONLY the raw markdown content.`, c.Plan)
 
 func (c *AutonomousCreator) doBuildAndRun() (string, error) {
 	codeCtx := c.buildCodeContext()
+	sysCtx := getSystemContext()
 
 	// Ask the AI how to build and run this specific project
 	prompt := fmt.Sprintf(`You are an expert software engineer. A project was generated with this plan:
 %s
 
 Here are the actual files:
+%s
+
+System environment:
 %s
 
 Provide the commands to build and run this application in EXACTLY this format (one per line, no extra text):
@@ -767,9 +695,10 @@ PORT: <port number if server, or NONE>
 RUN_INSTRUCTIONS: <one-line human-readable instruction for the user to run it manually>
 
 Rules:
-- Base answers on the ACTUAL CODE.
+- Base answers on the ACTUAL CODE and system environment.
+- For Python: if a venv directory exists, use venv/bin/python and venv/bin/uvicorn etc.
 - Do NOT wrap commands in markdown.
-- Assume we are already inside the project directory.`, c.Plan, codeCtx)
+- Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
 	analysis, err := aicall(c.AIClient, c.Model, prompt)
 	if err != nil {
@@ -1049,16 +978,6 @@ func stripGoModInit(cmds string) string {
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
 
-// runGoModTidy runs go mod tidy to download dependencies
-func (c *AutonomousCreator) runGoModTidy() error {
-	cmd := exec.Command("go", "mod", "tidy")
-	cmd.Dir = c.ProjectDir
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("go mod tidy failed: %v\nOutput: %s", err, string(output))
-	}
-	return nil
-}
 
 // isPortAvailable checks if a port is available for binding
 func isPortAvailable(port string) (bool, error) {
@@ -1069,6 +988,41 @@ func isPortAvailable(port string) (bool, error) {
 	}
 	listener.Close()
 	return true, nil
+}
+
+// getSystemContext gathers runtime environment information (OS, shell, Python
+// version, Go version, etc.) so the AI can make informed decisions about
+// commands that are appropriate for this specific system.
+func getSystemContext() string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("OS: %s/%s\n", runtime.GOOS, runtime.GOARCH))
+
+	// Shell
+	shell := os.Getenv("SHELL")
+	if shell == "" && runtime.GOOS == "windows" {
+		shell = "cmd"
+	}
+	sb.WriteString(fmt.Sprintf("Shell: %s\n", shell))
+
+	// Go version
+	if out, err := exec.Command("go", "version").Output(); err == nil {
+		sb.WriteString(fmt.Sprintf("Go: %s\n", strings.TrimSpace(string(out))))
+	}
+
+	// Python version
+	for _, py := range []string{"python3", "python"} {
+		if out, err := exec.Command(py, "--version").Output(); err == nil {
+			sb.WriteString(fmt.Sprintf("Python: %s\n", strings.TrimSpace(string(out))))
+			// Check for PEP 668 (externally-managed-environment)
+			testOut, testErr := exec.Command(py, "-m", "pip", "install", "--dry-run", "pip").CombinedOutput()
+			if testErr != nil && strings.Contains(string(testOut), "externally-managed-environment") {
+				sb.WriteString("Python-PEP668: YES (must use venv for pip install)\n")
+			}
+			break
+		}
+	}
+
+	return sb.String()
 }
 
 // cleanAIResponse strips markdown code fences from AI responses.
@@ -1139,12 +1093,19 @@ func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
 // aiDrivenFix asks the AI to analyze an error, fix the code, and retry the command.
 // It performs up to 3 fix attempts. Returns a log of what happened or an error if
 // all attempts fail.
+
+// aiDrivenFix asks the AI to analyze an error, fix the code or suggest alternative
+// commands, and retry. It performs up to 3 fix attempts. The AI can respond with:
+//   - FIX_FILE / FIX_CONTENT / END_FIX: to patch source files
+//   - FIX_CMD: to provide a corrected command to run instead
+//   - RETRY_CMD: the command to retry after fixes (or SAME)
+//   - UNFIXABLE: if the error cannot be resolved
 func (c *AutonomousCreator) aiDrivenFix(failedCmd, errorOutput, context string) (string, error) {
 	var result strings.Builder
 	maxAttempts := 3
+	sysCtx := getSystemContext()
 
 	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		// Re-read files from disk each attempt so we have the latest state
 		codeCtx := c.buildCodeContextFromDisk()
 
 		if c.logger != nil {
@@ -1152,34 +1113,44 @@ func (c *AutonomousCreator) aiDrivenFix(failedCmd, errorOutput, context string) 
 		}
 		result.WriteString(fmt.Sprintf("ai-assist %s\nFix attempt %d/%d for %s error...\n", getCurrentTime(), attempt, maxAttempts, context))
 
-		// Ask AI to diagnose and fix
 		prompt := fmt.Sprintf(`You are an expert software engineer debugging a project.
 A %s error occurred while running: %s
 
 Error output:
 %s
 
+System environment:
+%s
+
 Here are the current project files:
 %s
 
-Analyze the error carefully and provide fixes. Return your response in EXACTLY this format:
+Analyze the error carefully and provide a fix. Return your response in EXACTLY this format:
 
+OPTION A — If the fix requires changing source files:
 For each file that needs changing:
 FIX_FILE: <relative path>
 FIX_CONTENT: <complete new file content>
 END_FIX
 
-After all fixes:
+After all file fixes:
 RETRY_CMD: <the command to retry, or SAME to reuse the original>
 
-If the error cannot be fixed by changing code (e.g. missing system tool), return:
+OPTION B — If the fix requires a different command (e.g. environment setup, venv creation, different flags):
+FIX_CMD: <the corrected shell command or script that should be run instead>
+RETRY_CMD: <the command to retry after FIX_CMD succeeds, or SAME>
+
+OPTION C — If the error cannot be fixed:
 UNFIXABLE: <explanation>
 
 Rules:
-- Provide the COMPLETE file content, not just the changed lines.
+- Provide COMPLETE file content for FIX_FILE, not just changed lines.
 - Do NOT wrap content in markdown code fences.
-- Base fixes on the actual error message and code.
-- If the error is about missing files or wrong paths, create the correct files.`, context, failedCmd, errorOutput, codeCtx)
+- Base fixes on the actual error message, code, AND system environment.
+- For Python on systems with PEP 668 (externally-managed-environment), use a virtual environment.
+- FIX_CMD is for running setup/environment commands (like creating a venv, installing system packages, etc.)
+- You can combine FIX_FILE and FIX_CMD if both code changes and command changes are needed.
+- Assume we are already inside the project directory.`, context, failedCmd, errorOutput, sysCtx, codeCtx)
 
 		fixResponse, err := aicall(c.AIClient, c.Model, prompt)
 		if err != nil {
@@ -1191,14 +1162,13 @@ Rules:
 			return result.String(), fmt.Errorf("AI determined error is unfixable: %s", unfixable)
 		}
 
-		// Apply fixes
+		// Apply file fixes
 		fixesApplied := 0
 		lines := strings.Split(fixResponse, "\n")
 		for i := 0; i < len(lines); i++ {
 			trimmed := strings.TrimSpace(lines[i])
 			if strings.HasPrefix(trimmed, "FIX_FILE:") {
 				filePath := strings.TrimSpace(trimmed[len("FIX_FILE:"):])
-				// Collect content until END_FIX
 				var content strings.Builder
 				inContent := false
 				for i++; i < len(lines); i++ {
@@ -1206,7 +1176,6 @@ Rules:
 						break
 					}
 					if !inContent && strings.HasPrefix(strings.TrimSpace(lines[i]), "FIX_CONTENT:") {
-						// First line of content might be on the same line as FIX_CONTENT:
 						firstLine := strings.TrimSpace(lines[i][len("FIX_CONTENT:"):])
 						if firstLine != "" {
 							content.WriteString(firstLine)
@@ -1227,10 +1196,28 @@ Rules:
 					if err := os.WriteFile(absPath, []byte(cleanContent), 0644); err == nil {
 						c.FilesToMake[filePath] = cleanContent
 						fixesApplied++
-						result.WriteString(fmt.Sprintf("Fixed: %s\n", filePath))
+						result.WriteString(fmt.Sprintf("Fixed file: %s\n", filePath))
 					}
 				}
 			}
+		}
+
+		// Execute FIX_CMD if provided (environment/command fixes)
+		fixCmd := extractAIField(fixResponse, "FIX_CMD")
+		if fixCmd != "" && !strings.EqualFold(fixCmd, "NONE") {
+			fixCmd = cleanAIResponse(fixCmd)
+			result.WriteString(fmt.Sprintf("Running fix command: %s\n", fixCmd))
+			if c.logger != nil {
+				c.logger.Log("Running fix command: %s", fixCmd)
+			}
+			out, cmdErr := c.runShellCmd(fixCmd)
+			if cmdErr != nil {
+				result.WriteString(fmt.Sprintf("Fix command failed: %s\n", string(out)))
+				errorOutput = string(out)
+				continue // try next attempt with the new error
+			}
+			result.WriteString(fmt.Sprintf("Fix command succeeded.\n"))
+			fixesApplied++
 		}
 
 		if fixesApplied == 0 {
@@ -1239,6 +1226,7 @@ Rules:
 				result2, fixErr := c.fallbackFix(errorOutput, context, failedCmd)
 				if fixErr == nil && result2 != nil && result2.Success {
 					result.WriteString("Fallback fixer resolved the issue.\n")
+					fixesApplied++
 				}
 			}
 		}
@@ -1255,12 +1243,13 @@ Rules:
 			result.WriteString(fmt.Sprintf("✓ %s succeeded after fix.\n", context))
 			return result.String(), nil
 		}
-		errorOutput = string(out) // feed new error into next attempt
+		errorOutput = string(out)
 		result.WriteString(fmt.Sprintf("Retry failed: %s\n", string(out)))
 	}
 
 	return result.String(), fmt.Errorf("%s failed after %d fix attempts", context, maxAttempts)
 }
+
 
 // smokeTestServer starts a server command, waits for it to respond on the given port,
 // then kills it. Returns a log and nil on success, or an error if the server didn't respond.
