@@ -478,6 +478,27 @@ func (a *AIChatPane) DisplayResponseWithTokens(response string, inputTokens, out
 	a.scrollToBottom()
 }
 
+// RecordAgenticTokens records token usage from agentic operations (fix, project, etc.)
+// on the most recent user message in the session, so session-level token aggregation
+// includes tokens consumed by autonomous AI calls.
+func (a *AIChatPane) RecordAgenticTokens(inputTokens, outputTokens, totalTokens int) {
+	if len(a.messages) == 0 {
+		return
+	}
+	// Find the last assistant or notification message and add tokens to it.
+	// If none exists, attribute to the last message regardless of role.
+	idx := len(a.messages) - 1
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == "assistant" {
+			idx = i
+			break
+		}
+	}
+	a.messages[idx].InputTokens += inputTokens
+	a.messages[idx].OutputTokens += outputTokens
+	a.messages[idx].TotalTokens += totalTokens
+}
+
 // DisplayNotification displays a change notification in the chat pane with distinct formatting.
 // Used by AgenticCodeFixer to show fix results with cyan color and notification label.
 // Adds the notification to conversation history and scrolls to bottom.

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/user/terminal-intelligence/internal/executor"
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // AgenticProjectFixer orchestrates the project-wide agentic fixing workflow.
@@ -267,6 +268,9 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 	var lastModified []FileResult
 	success := false
 
+	// Track cumulative token usage across all AI calls in this session.
+	var sessionInputTokens, sessionOutputTokens int
+
 	for attempt := 1; attempt <= request.MaxAttempts; attempt++ {
 		// (a) Check AI availability (Req 10.4, 10.5).
 		available, aiErr := apf.aiClient.IsAvailable()
@@ -293,7 +297,11 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 		prompt := apf.buildAgenticPrompt(session, ranked, lastTestResult)
 
 		// (d) Call AI to generate response.
-		responseChan, genErr := apf.aiClient.Generate(prompt, apf.model, nil, nil)
+		var attemptTokens types.TokenUsage
+		onTokenUsage := func(usage types.TokenUsage) {
+			attemptTokens = usage
+		}
+		responseChan, genErr := apf.aiClient.Generate(prompt, apf.model, nil, onTokenUsage)
 		if genErr != nil {
 			apf.logger.Log("AI generation failed: %s", genErr.Error())
 			// Record failed attempt and continue.
@@ -318,6 +326,10 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 			sb.WriteString(chunk)
 		}
 		aiResponse := sb.String()
+
+		// Accumulate token usage from this attempt.
+		sessionInputTokens += attemptTokens.InputTokens
+		sessionOutputTokens += attemptTokens.OutputTokens
 
 		// (e) Handle empty AI response.
 		if strings.TrimSpace(aiResponse) == "" {
@@ -551,6 +563,9 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 		TotalAttempts: len(session.Attempts),
 		TotalCycles:   session.CurrentCycle + 1,
 		Attempts:      session.Attempts,
+		InputTokens:   sessionInputTokens,
+		OutputTokens:  sessionOutputTokens,
+		TotalTokens:   sessionInputTokens + sessionOutputTokens,
 	}
 
 	if success {

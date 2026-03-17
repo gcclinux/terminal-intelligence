@@ -535,13 +535,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.aiPane.streaming = false
 		result := msg.Result
 
+		// Record token usage from the agentic fix on the session.
+		if result.InputTokens > 0 || result.OutputTokens > 0 {
+			a.aiPane.RecordAgenticTokens(result.InputTokens, result.OutputTokens, result.TotalTokens)
+		}
+
 		// Handle fix results
 		if result.IsConversational {
 			// Should not happen if detected correctly, but handle gracefully
 			return a, a.aiPane.SendMessage(result.ChangesSummary, "")
-			// Wait, ChangesSummary might be empty/wrong if conversational.
-			// Actually ProcessMessage returns conversational result with empty content?
-			// Let's just log or ignore if it happens unexpectedly for now, or display error.
 		}
 
 		if result.Success {
@@ -643,8 +645,23 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		status, err := a.autonomousCreator.Step()
 		if err != nil {
 			a.aiPane.DisplayNotification("Autonomous Creation Error: " + err.Error())
+			// Record any tokens accumulated before the error.
+			if a.autonomousCreator.InputTokens > 0 || a.autonomousCreator.OutputTokens > 0 {
+				a.aiPane.RecordAgenticTokens(a.autonomousCreator.InputTokens, a.autonomousCreator.OutputTokens, a.autonomousCreator.TotalTokens)
+				a.autonomousCreator.InputTokens = 0
+				a.autonomousCreator.OutputTokens = 0
+				a.autonomousCreator.TotalTokens = 0
+			}
 			a.autonomousCreator = nil // Reset state on error
 			return a, nil
+		}
+
+		// Record token usage accumulated during this step.
+		if a.autonomousCreator.InputTokens > 0 || a.autonomousCreator.OutputTokens > 0 {
+			a.aiPane.RecordAgenticTokens(a.autonomousCreator.InputTokens, a.autonomousCreator.OutputTokens, a.autonomousCreator.TotalTokens)
+			a.autonomousCreator.InputTokens = 0
+			a.autonomousCreator.OutputTokens = 0
+			a.autonomousCreator.TotalTokens = 0
 		}
 
 		if status != "" {
@@ -691,6 +708,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.LastPreviewRequest != "" {
 			a.lastPreviewRequest = msg.LastPreviewRequest
 		}
+
+		// Record token usage from the project operation on the chat session.
+		if msg.Report != nil && (msg.Report.InputTokens > 0 || msg.Report.OutputTokens > 0) {
+			a.aiPane.RecordAgenticTokens(msg.Report.InputTokens, msg.Report.OutputTokens, msg.Report.TotalTokens)
+		}
+
 		a.aiPane.DisplayNotification(msg.Formatted)
 
 		// Open modified files sequentially into the editor panel.
@@ -731,6 +754,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if result == nil {
 			a.aiPane.DisplayNotification("Fix session returned no result.")
 			return a, nil
+		}
+
+		// Record token usage from the fix session on the chat session.
+		if result.InputTokens > 0 || result.OutputTokens > 0 {
+			a.aiPane.RecordAgenticTokens(result.InputTokens, result.OutputTokens, result.TotalTokens)
 		}
 
 		// Build a summary to display

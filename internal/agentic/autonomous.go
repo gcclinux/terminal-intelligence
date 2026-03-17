@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/user/terminal-intelligence/internal/ai"
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 var projectNameRe = regexp.MustCompile(`(?im)project\s*name\s*[:\-]?\s*` + `\**` + "`?" + `([a-zA-Z0-9\-_]+)` + "`?" + `\**`)
@@ -51,6 +52,11 @@ type AutonomousCreator struct {
 	// Running process (for web servers)
 	RunningProcess *exec.Cmd
 	ServerURL      string // URL of the running server
+
+	// Cumulative token usage across all AI calls in this creation session.
+	InputTokens  int
+	OutputTokens int
+	TotalTokens  int
 
 	// Fallback fixer for unresolvable test/build errors (optional, nil = skip fallback)
 	fixer *AgenticProjectFixer
@@ -186,7 +192,7 @@ IMPORTANT RULES:
 - List every single file that will be created — do not summarize with "..." or "etc".
 - The project name MUST appear as "Project Name: <name>" on its own line.`, c.Description)
 
-	plan, err := aicall(c.AIClient, c.Model, prompt)
+	plan, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -249,7 +255,6 @@ func (c *AutonomousCreator) doSetup() (string, error) {
 	return message, nil
 }
 
-
 func (c *AutonomousCreator) doDependencies() (string, error) {
 	codeCtx := c.buildCodeContext()
 	sysCtx := getSystemContext()
@@ -276,7 +281,7 @@ Rules:
 - For Python projects on PEP 668 systems: use "python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt" (adjust paths as needed).
 - Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
-	cmdsStr, err := aicall(c.AIClient, c.Model, prompt)
+	cmdsStr, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -325,7 +330,6 @@ Rules:
 	return fmt.Sprintf("ai-assist %s\nDependencies installed successfully.\n\nMoving to testing...", getCurrentTime()), nil
 }
 
-
 func (c *AutonomousCreator) doFileCreation() (string, error) {
 	prompt := fmt.Sprintf(`You are an expert autonomous software engineer.
 Given the implementation plan below, generate ALL the necessary code files for this project.
@@ -359,7 +363,7 @@ package main
 
 Only return the file paths and code blocks. No other text.`, c.Plan)
 
-	response, err := aicall(c.AIClient, c.Model, prompt)
+	response, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -498,7 +502,7 @@ MISSING_FILES:
 
 Only output STRUCTURE_OK or the missing files. No other text.`, c.Plan, fileList)
 
-	response, err := aicall(c.AIClient, c.Model, prompt)
+	response, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -536,7 +540,6 @@ Only output STRUCTURE_OK or the missing files. No other text.`, c.Plan, fileList
 	return result.String(), nil
 }
 
-
 func (c *AutonomousCreator) doTesting() (string, error) {
 	codeCtx := c.buildCodeContext()
 	sysCtx := getSystemContext()
@@ -566,7 +569,7 @@ Rules:
 - Do NOT wrap commands in markdown. Return raw commands only.
 - Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
-	analysis, err := aicall(c.AIClient, c.Model, prompt)
+	analysis, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -639,7 +642,6 @@ Rules:
 	return result.String(), nil
 }
 
-
 func (c *AutonomousCreator) doDocumentation() (string, error) {
 	prompt := fmt.Sprintf(`Given the implementation plan:
 %s
@@ -647,7 +649,7 @@ func (c *AutonomousCreator) doDocumentation() (string, error) {
 Generate a SUMMARY.md file that explains the architecture, how to build/run the project, and how it was constructed.
 Return ONLY the raw markdown content.`, c.Plan)
 
-	summary, err := aicall(c.AIClient, c.Model, prompt)
+	summary, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -671,7 +673,6 @@ Return ONLY the raw markdown content.`, c.Plan)
 	c.State = StateBuildAndRun
 	return fmt.Sprintf("ai-assist %s\nSuccessfully generated SUMMARY.md (opened in editor)\n\nMoving to build and run...", getCurrentTime()), nil
 }
-
 
 func (c *AutonomousCreator) doBuildAndRun() (string, error) {
 	codeCtx := c.buildCodeContext()
@@ -700,7 +701,7 @@ Rules:
 - Do NOT wrap commands in markdown.
 - Assume we are already inside the project directory.`, c.Plan, codeCtx, sysCtx)
 
-	analysis, err := aicall(c.AIClient, c.Model, prompt)
+	analysis, err := c.aicallAndTrack(prompt)
 	if err != nil {
 		return "", err
 	}
@@ -768,11 +769,6 @@ Rules:
 	return result.String(), nil
 }
 
-
-
-
-
-
 // runScriptWithFallback runs a shell script, trying bash first then sh as fallback.
 // It returns the combined output, any error, and a log string describing what was attempted.
 func runScriptWithFallback(scriptPath, dir string) ([]byte, error, string) {
@@ -803,16 +799,36 @@ func runScriptWithFallback(scriptPath, dir string) ([]byte, error, string) {
 }
 
 func aicall(client ai.AIClient, model, prompt string) (string, error) {
-	ch, err := client.Generate(prompt, model, nil, nil)
+	resp, usage, err := aicallWithTokens(client, model, prompt)
+	_ = usage
+	return resp, err
+}
+
+// aicallAndTrack calls the AI and accumulates token usage on the creator.
+func (c *AutonomousCreator) aicallAndTrack(prompt string) (string, error) {
+	resp, usage, err := aicallWithTokens(c.AIClient, c.Model, prompt)
+	c.InputTokens += usage.InputTokens
+	c.OutputTokens += usage.OutputTokens
+	c.TotalTokens += usage.InputTokens + usage.OutputTokens
+	return resp, err
+}
+
+func aicallWithTokens(client ai.AIClient, model, prompt string) (string, types.TokenUsage, error) {
+	var tokenUsage types.TokenUsage
+	onTokenUsage := func(usage types.TokenUsage) {
+		tokenUsage = usage
+	}
+
+	ch, err := client.Generate(prompt, model, nil, onTokenUsage)
 	if err != nil {
-		return "", err
+		return "", tokenUsage, err
 	}
 
 	var sb strings.Builder
 	for chunk := range ch {
 		sb.WriteString(chunk)
 	}
-	return sb.String(), nil
+	return sb.String(), tokenUsage, nil
 }
 
 func extractProjectName(plan string) string {
@@ -952,9 +968,6 @@ func (c *AutonomousCreator) detectWebServer() (bool, string) {
 	return true, port
 }
 
-
-
-
 // stripGoModInit removes "go mod init ..." segments from a command string
 // when go.mod was already generated during file creation. It handles both
 // chained commands (&&) and standalone lines, preserving the rest of the script.
@@ -977,7 +990,6 @@ func stripGoModInit(cmds string) string {
 	}
 	return strings.TrimSpace(strings.Join(cleaned, "\n"))
 }
-
 
 // isPortAvailable checks if a port is available for binding
 func isPortAvailable(port string) (bool, error) {
@@ -1152,7 +1164,7 @@ Rules:
 - You can combine FIX_FILE and FIX_CMD if both code changes and command changes are needed.
 - Assume we are already inside the project directory.`, context, failedCmd, errorOutput, sysCtx, codeCtx)
 
-		fixResponse, err := aicall(c.AIClient, c.Model, prompt)
+		fixResponse, err := c.aicallAndTrack(prompt)
 		if err != nil {
 			return result.String(), fmt.Errorf("AI fix call failed: %v", err)
 		}
@@ -1249,7 +1261,6 @@ Rules:
 
 	return result.String(), fmt.Errorf("%s failed after %d fix attempts", context, maxAttempts)
 }
-
 
 // smokeTestServer starts a server command, waits for it to respond on the given port,
 // then kills it. Returns a log and nil on success, or an error if the server didn't respond.
@@ -1363,7 +1374,6 @@ func (c *AutonomousCreator) launchInTerminal(cmdStr string) bool {
 	c.RunningProcess = runCmd
 	return true
 }
-
 
 // Returns "python" or "python3" depending on what's available, or empty string if neither found
 func detectPythonBinary() string {
