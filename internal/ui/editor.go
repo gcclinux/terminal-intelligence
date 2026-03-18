@@ -1165,3 +1165,50 @@ func (e *EditorPane) GetCurrentFile() *FileContext {
 func (e *EditorPane) GetSuggestedName() string {
 	return e.suggestedName
 }
+
+// SetCursorLine moves the cursor to the specified line and adjusts scroll if needed
+func (e *EditorPane) SetCursorLine(line int) {
+	lines := strings.Split(e.content, "\n")
+	
+	// Clamp line to valid range
+	if line < 0 {
+		line = 0
+	}
+	if line >= len(lines) {
+		line = len(lines) - 1
+	}
+	
+	e.cursorLine = line
+	e.cursorCol = 0 // Move to beginning of line
+	e.adjustScroll()
+}
+
+// SetCursorPosition moves the cursor to the specified line and column position
+func (e *EditorPane) SetCursorPosition(line, col int) {
+	lines := strings.Split(e.content, "\n")
+	
+	// Clamp line to valid range
+	if line < 0 {
+		line = 0
+	}
+	if line >= len(lines) {
+		line = len(lines) - 1
+	}
+	
+	// Clamp column to valid range for the line
+	if line < len(lines) {
+		lineLength := len(lines[line])
+		if col < 0 {
+			col = 0
+		}
+		if col > lineLength {
+			col = lineLength
+		}
+	} else {
+		col = 0
+	}
+	
+	e.cursorLine = line
+	e.cursorCol = col
+	e.adjustScroll()
+}

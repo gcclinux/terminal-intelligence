@@ -56,7 +56,11 @@ func (a *App) renderHelpDialog() string {
 	leftColumn += keyStyle.Render("  ↑↓") + descStyle.Render("        Scroll line by line") + "\n"
 	leftColumn += keyStyle.Render("  PgUp/PgDn") + descStyle.Render(" Scroll page") + "\n"
 	leftColumn += keyStyle.Render("  Home/End") + descStyle.Render("  Jump to top/bottom") + "\n"
-	leftColumn += keyStyle.Render("  Esc") + descStyle.Render("       Back") + "\n"
+	leftColumn += keyStyle.Render("  Ctrl+F") + descStyle.Render("    Find text in current file") + "\n"
+	leftColumn += keyStyle.Render("  Alt+F") + descStyle.Render("     Find and Replace") + "\n"
+	leftColumn += keyStyle.Render("  F3") + descStyle.Render("        Find next occurrence") + "\n"
+	leftColumn += keyStyle.Render("  Ctrl+H") + descStyle.Render("    Help") + "\n"
+	leftColumn += keyStyle.Render("  Esc") + descStyle.Render("       Back / Exit search mode") + "\n"
 	leftColumn += "\n"
 
 	// Agent Commands section
