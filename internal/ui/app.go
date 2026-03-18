@@ -67,7 +67,7 @@ type App struct {
 	agenticFixer              *agentic.AgenticCodeFixer    // Autonomous code fixing orchestrator
 	projectFixer              *agentic.ProjectFixer        // Project-wide agentic fixer
 	agenticProjectFixer       *agentic.AgenticProjectFixer // Project-wide agentic fixer with retry loop
-	autonomousCreator         *agentic.AutonomousCreator   // Autonomous application builder
+  autonomousCreator         *agentic.AutonomousCreator   // Autonomous application builder
 	activePane                types.PaneType               // Currently focused pane
 	width                     int                          // Terminal width
 	height                    int                          // Terminal height
@@ -77,6 +77,8 @@ type App struct {
 	showFilePicker            bool                         // Whether file picker dialog is showing
 	showFolderPicker          bool                         // Whether folder picker dialog is showing
 	showFolderCreatePrompt    bool                         // Whether folder creation prompt is showing
+	showFindPrompt            bool                         // Whether find text prompt is showing
+	showFindReplacePrompt     bool                         // Whether find and replace prompt is showing
 	showBackupPicker          bool                         // Whether backup picker dialog is showing
 	showChatLoader            bool                         // Whether chat loader dialog is showing
 	showHelp                  bool                         // Whether help dialog is showing
@@ -85,6 +87,13 @@ type App struct {
 	fileTypeForInstall        string                       // File type that triggered install check
 	filePromptBuffer          string                       // Buffer for file name input
 	folderCreateBuffer        string                       // Buffer for new folder name input
+	findBuffer                string                       // Buffer for find text input
+	replaceBuffer             string                       // Buffer for replace text input
+	findTerm                  string                       // Current search term
+	findMode                  bool                         // Whether we're in find mode
+	findIndex                 int                          // Current search result index
+	findResults               []struct{ line, col int }    // Line and column positions of search results
+	findReplaceMode           int                          // 0: find input, 1: replace input
 	fileList                  []string                     // List of files for picker
 	folderList                []string                     // List of folders for picker
 	backupList                []string                     // List of backups for picker
@@ -884,6 +893,93 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 
+		// Handle find and replace prompt dialog
+		if a.showFindReplacePrompt {
+			switch msg.String() {
+			case "tab":
+				// Switch between find and replace input
+				a.findReplaceMode = 1 - a.findReplaceMode
+				if a.findReplaceMode == 0 {
+					a.statusMessage = "Enter text to find (Tab to replace, Esc to cancel)"
+				} else {
+					a.statusMessage = "Enter replacement text (Tab to find, Enter to replace all, Esc to cancel)"
+				}
+				return a, nil
+			case "enter":
+				// Replace all occurrences
+				if a.findBuffer != "" && a.findReplaceMode == 1 {
+					a.replaceAll()
+					a.showFindReplacePrompt = false
+					a.findBuffer = ""
+					a.replaceBuffer = ""
+					a.findReplaceMode = 0
+				}
+				return a, nil
+			case "esc":
+				// Cancel find and replace
+				a.showFindReplacePrompt = false
+				a.findBuffer = ""
+				a.replaceBuffer = ""
+				a.findReplaceMode = 0
+				a.statusMessage = "Find and replace cancelled"
+				return a, nil
+			case "backspace":
+				if a.findReplaceMode == 0 {
+					if len(a.findBuffer) > 0 {
+						a.findBuffer = a.findBuffer[:len(a.findBuffer)-1]
+					}
+				} else {
+					if len(a.replaceBuffer) > 0 {
+						a.replaceBuffer = a.replaceBuffer[:len(a.replaceBuffer)-1]
+					}
+				}
+				return a, nil
+			default:
+				// Add character to buffer
+				if len(msg.String()) == 1 {
+					if a.findReplaceMode == 0 {
+						a.findBuffer += msg.String()
+					} else {
+						a.replaceBuffer += msg.String()
+					}
+				}
+				return a, nil
+			}
+		}
+
+		// Handle find text prompt dialog
+		if a.showFindPrompt {
+			switch msg.String() {
+			case "enter":
+				// Start search
+				if a.findBuffer != "" {
+					a.findTerm = a.findBuffer
+					a.findMode = true
+					a.performSearch()
+				}
+				a.showFindPrompt = false
+				a.findBuffer = ""
+				return a, nil
+			case "esc":
+				// Cancel find
+				a.showFindPrompt = false
+				a.findBuffer = ""
+				a.statusMessage = "Find cancelled"
+				return a, nil
+			case "backspace":
+				if len(a.findBuffer) > 0 {
+					a.findBuffer = a.findBuffer[:len(a.findBuffer)-1]
+				}
+				return a, nil
+			default:
+				// Add character to buffer
+				if len(msg.String()) == 1 {
+					a.findBuffer += msg.String()
+				}
+				return a, nil
+			}
+		}
+
 		// Handle folder creation prompt dialog
 		if a.showFolderCreatePrompt {
 			switch msg.String() {
@@ -1438,6 +1534,50 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusMessage = "No search results to jump to"
 			}
 			return a, nil
+
+		case "alt+f":
+			// Open find and replace prompt
+			if a.editorPane.currentFile != nil {
+				a.showFindReplacePrompt = true
+				a.findBuffer = ""
+				a.replaceBuffer = ""
+				a.findReplaceMode = 0 // Start with find input
+				a.statusMessage = "Enter text to find (Esc to cancel)"
+			} else {
+				a.statusMessage = "No file open to search"
+			}
+			return a, nil
+
+		case "ctrl+f":
+			// Open find text prompt
+			if a.editorPane.currentFile != nil {
+				a.showFindPrompt = true
+				a.findBuffer = ""
+				a.statusMessage = "Enter text to find (Esc to cancel)"
+			} else {
+				a.statusMessage = "No file open to search"
+			}
+			return a, nil
+
+		case "f3":
+			// Continue search (find next)
+			if a.findMode && a.findTerm != "" && a.editorPane.currentFile != nil {
+				a.findNext()
+			} else {
+				a.statusMessage = "No active search. Use Ctrl+F to start searching"
+			}
+			return a, nil
+
+		case "esc":
+			// Exit find mode if active
+			if a.findMode {
+				a.findMode = false
+				a.findTerm = ""
+				a.findResults = nil
+				a.findIndex = 0
+				a.statusMessage = "Search mode exited"
+				return a, nil
+			}
 
 		case "ctrl+h":
 			// Toggle help menu
@@ -2145,6 +2285,93 @@ func (a *App) View() string {
 		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
 	}
 
+	// Show find and replace prompt dialog if needed
+	if a.showFindReplacePrompt {
+		promptStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(70).
+			Align(lipgloss.Center)
+
+		// Get the current file name
+		fileName := "No file"
+		if a.editorPane.currentFile != nil {
+			fileName = filepath.Base(a.editorPane.currentFile.Filepath)
+		}
+
+		promptText := "Find and Replace:\n"
+		promptText += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("File: "+fileName) + "\n\n"
+
+		// Find input
+		findLabel := "Find:    "
+		if a.findReplaceMode == 0 {
+			findLabel = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("62")).
+				Render(findLabel)
+		}
+		promptText += findLabel + a.findBuffer
+		if a.findReplaceMode == 0 {
+			promptText += "█"
+		}
+		promptText += "\n"
+
+		// Replace input
+		replaceLabel := "Replace: "
+		if a.findReplaceMode == 1 {
+			replaceLabel = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(lipgloss.Color("62")).
+				Render(replaceLabel)
+		}
+		promptText += replaceLabel + a.replaceBuffer
+		if a.findReplaceMode == 1 {
+			promptText += "█"
+		}
+		promptText += "\n\n"
+
+		if a.findReplaceMode == 0 {
+			promptText += "[Tab] Replace | [Esc] Cancel"
+		} else {
+			promptText += "[Tab] Find | [Enter] Replace All | [Esc] Cancel"
+		}
+
+		dialog := promptStyle.Render(promptText)
+
+		// Center the dialog
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
+	// Show find text prompt dialog if needed
+	if a.showFindPrompt {
+		promptStyle := lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("62")).
+			Padding(1, 2).
+			Width(60).
+			Align(lipgloss.Center)
+
+		// Get the current file name
+		fileName := "No file"
+		if a.editorPane.currentFile != nil {
+			fileName = filepath.Base(a.editorPane.currentFile.Filepath)
+		}
+
+		promptText := "Find text in file:\n"
+		promptText += lipgloss.NewStyle().
+			Foreground(lipgloss.Color("15")).
+			Render("File: "+fileName) + "\n\n"
+		promptText += a.findBuffer + "█\n\n[Enter] to search, [Esc] to cancel"
+
+		dialog := promptStyle.Render(promptText)
+
+		// Center the dialog
+		return lipgloss.Place(a.width, a.height, lipgloss.Center, lipgloss.Center, dialog)
+	}
+
 	// Show folder creation prompt dialog if needed
 	if a.showFolderCreatePrompt {
 		promptStyle := lipgloss.NewStyle().
@@ -2295,6 +2522,11 @@ func (a *App) View() string {
 
 	// Simplified status bar - details available via Ctrl+H help
 	statusText := "Ctrl+H: Help | Ctrl+W: Workspace | Ctrl+O: Open | Ctrl+S: Save | Tab: Cycle Areas | Ctrl+Q: Quit"
+
+	// Add find mode instructions when in find mode
+	if a.findMode && a.findTerm != "" {
+		statusText = fmt.Sprintf("FIND MODE: '%s' | F3: Next | Esc: Exit | %s", a.findTerm, statusText)
+	}
 
 	// Add AI-specific instructions when AI pane is focused
 	if a.activePane == types.AIPaneType || a.activePane == types.AIResponsePaneType {
@@ -3213,4 +3445,111 @@ func extractProjectNameFromPlan(plan string) string {
 		}
 	}
 	return ""
+}
+
+// performSearch searches for the current find term in the active file
+func (a *App) performSearch() {
+	if a.editorPane.currentFile == nil || a.findTerm == "" {
+		return
+	}
+
+	content := a.editorPane.GetContent()
+	lines := strings.Split(content, "\n")
+	a.findResults = nil
+	a.findIndex = 0
+
+	// Search for the term in each line (case-insensitive)
+	searchTerm := strings.ToLower(a.findTerm)
+	for lineNum, line := range lines {
+		lowerLine := strings.ToLower(line)
+		col := 0
+		for {
+			// Find next occurrence in this line
+			pos := strings.Index(lowerLine[col:], searchTerm)
+			if pos == -1 {
+				break
+			}
+			// Store the actual position (col + pos)
+			a.findResults = append(a.findResults, struct{ line, col int }{lineNum, col + pos})
+			col += pos + 1 // Move past this match to find next one
+		}
+	}
+
+	if len(a.findResults) > 0 {
+		// Jump to first result
+		result := a.findResults[0]
+		a.editorPane.SetCursorPosition(result.line, result.col)
+		a.statusMessage = fmt.Sprintf("Found %d matches. Press F3 for next, Esc to exit search", len(a.findResults))
+	} else {
+		a.statusMessage = "No matches found for: " + a.findTerm
+		a.findMode = false
+	}
+}
+
+// findNext jumps to the next search result
+func (a *App) findNext() {
+	if len(a.findResults) == 0 {
+		return
+	}
+
+	a.findIndex++
+	if a.findIndex >= len(a.findResults) {
+		a.findIndex = 0 // Wrap around to first result
+	}
+
+	// Jump to the result
+	result := a.findResults[a.findIndex]
+	a.editorPane.SetCursorPosition(result.line, result.col)
+	a.statusMessage = fmt.Sprintf("Match %d of %d. Press F3 for next, Esc to exit search", a.findIndex+1, len(a.findResults))
+}
+
+// replaceAll replaces all occurrences of the find term with the replace term
+func (a *App) replaceAll() {
+	if a.editorPane.currentFile == nil || a.findBuffer == "" {
+		return
+	}
+
+	content := a.editorPane.GetContent()
+	
+	// Replace all occurrences (case-insensitive search, but preserve case in replacement)
+	searchTerm := a.findBuffer
+	replaceTerm := a.replaceBuffer
+	
+	// Simple case-insensitive replace
+	lowerContent := strings.ToLower(content)
+	lowerSearch := strings.ToLower(searchTerm)
+	
+	var result strings.Builder
+	lastIndex := 0
+	count := 0
+	
+	for {
+		index := strings.Index(lowerContent[lastIndex:], lowerSearch)
+		if index == -1 {
+			// No more matches, append the rest
+			result.WriteString(content[lastIndex:])
+			break
+		}
+		
+		// Append content before the match
+		actualIndex := lastIndex + index
+		result.WriteString(content[lastIndex:actualIndex])
+		
+		// Append replacement
+		result.WriteString(replaceTerm)
+		
+		// Move past the matched text
+		lastIndex = actualIndex + len(searchTerm)
+		count++
+	}
+	
+	// Update the editor content
+	a.editorPane.SetContent(result.String())
+	
+	// Save the file
+	if err := a.editorPane.SaveFile(); err != nil {
+		a.statusMessage = fmt.Sprintf("Replaced %d occurrences but save failed: %v", count, err)
+	} else {
+		a.statusMessage = fmt.Sprintf("Replaced %d occurrences", count)
+	}
 }
