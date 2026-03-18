@@ -478,6 +478,27 @@ func (a *AIChatPane) DisplayResponseWithTokens(response string, inputTokens, out
 	a.scrollToBottom()
 }
 
+// RecordAgenticTokens records token usage from agentic operations (fix, project, etc.)
+// on the most recent user message in the session, so session-level token aggregation
+// includes tokens consumed by autonomous AI calls.
+func (a *AIChatPane) RecordAgenticTokens(inputTokens, outputTokens, totalTokens int) {
+	if len(a.messages) == 0 {
+		return
+	}
+	// Find the last assistant or notification message and add tokens to it.
+	// If none exists, attribute to the last message regardless of role.
+	idx := len(a.messages) - 1
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].Role == "assistant" {
+			idx = i
+			break
+		}
+	}
+	a.messages[idx].InputTokens += inputTokens
+	a.messages[idx].OutputTokens += outputTokens
+	a.messages[idx].TotalTokens += totalTokens
+}
+
 // DisplayNotification displays a change notification in the chat pane with distinct formatting.
 // Used by AgenticCodeFixer to show fix results with cyan color and notification label.
 // Adds the notification to conversation history and scrolls to bottom.
@@ -728,8 +749,10 @@ func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 		a.ensureTiDirInGitignore()
 	}
 
+	newSession := false
 	if a.sessionFile == "" {
 		a.sessionFile = filepath.Join(tiDir, fmt.Sprintf("session_token_chat_%s.md", time.Now().Format("20060102_150405")))
+		newSession = true
 	}
 
 	f, err := os.OpenFile(a.sessionFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
@@ -738,6 +761,14 @@ func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 		return
 	}
 	defer f.Close()
+
+	// Write agent/model header as the first line of a new session
+	if newSession {
+		header := fmt.Sprintf("Agent: %s | LLM: %s\n\n", a.provider, a.model)
+		if _, err := f.WriteString(header); err != nil {
+			fmt.Fprintf(os.Stderr, "Error writing session header: %v\n", err)
+		}
+	}
 
 	var content strings.Builder
 	content.WriteString(msg.Role)

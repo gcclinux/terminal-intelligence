@@ -81,6 +81,9 @@ type FixResult struct {
 	ErrorMessage     string
 	IsConversational bool
 	PreviewMode      bool
+	InputTokens      int
+	OutputTokens     int
+	TotalTokens      int
 }
 
 // Validate checks if the FixResult satisfies its invariants
@@ -180,6 +183,9 @@ type ChangeReport struct {
 	PatchFailures     []PatchFailure
 	TruncationWarning string // set when >500 files were found
 	PreviewMode       bool
+	InputTokens       int
+	OutputTokens      int
+	TotalTokens       int
 }
 
 // ProjectFixRequest is the input to a project-wide fix operation.
@@ -279,6 +285,9 @@ type FixSessionResult struct {
 	Attempts      []FixAttempt
 	FinalReport   *ChangeReport
 	ErrorMessage  string
+	InputTokens   int
+	OutputTokens  int
+	TotalTokens   int
 }
 
 // TestResult captures the outcome of running a test command.

@@ -1,6 +1,7 @@
 package gemini
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -24,7 +25,7 @@ func NewGeminiClient(apiKey string) *GeminiClient {
 		apiKey:  apiKey,
 		baseURL: "https://generativelanguage.googleapis.com/v1beta",
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 5 * time.Minute,
 		},
 	}
 }
@@ -35,7 +36,7 @@ func NewGeminiClientWithURL(apiKey string, baseURL string) *GeminiClient {
 		apiKey:  apiKey,
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout: 5 * time.Minute,
 		},
 	}
 }
@@ -53,7 +54,8 @@ type geminiPart struct {
 	Text string `json:"text"`
 }
 
-// geminiResponse represents the response from Gemini API
+// geminiResponse represents a single response chunk from Gemini API
+// Used for both streaming (streamGenerateContent) and non-streaming responses.
 type geminiResponse struct {
 	Candidates    []geminiCandidate    `json:"candidates"`
 	Error         *geminiError         `json:"error,omitempty"`
@@ -65,6 +67,7 @@ type geminiUsageMetadata struct {
 	PromptTokenCount     int `json:"promptTokenCount"`
 	CandidatesTokenCount int `json:"candidatesTokenCount"`
 	TotalTokenCount      int `json:"totalTokenCount"`
+	ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
 }
 
 type geminiCandidate struct {
@@ -85,7 +88,9 @@ func (gc *GeminiClient) IsAvailable() (bool, error) {
 	return true, nil
 }
 
-// Generate generates AI response from Gemini
+// Generate generates AI response from Gemini using the streaming API.
+// This uses streamGenerateContent to receive chunks as they are generated,
+// providing real-time streaming and reliable token usage reporting.
 func (gc *GeminiClient) Generate(prompt string, model string, context []int, onTokenUsage func(types.TokenUsage)) (<-chan string, error) {
 	if model == "" {
 		model = "gemini-2.0-flash-exp"
@@ -106,7 +111,7 @@ func (gc *GeminiClient) Generate(prompt string, model string, context []int, onT
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", gc.baseURL, model, gc.apiKey)
+	url := fmt.Sprintf("%s/models/%s:streamGenerateContent?alt=sse&key=%s", gc.baseURL, model, gc.apiKey)
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -117,51 +122,73 @@ func (gc *GeminiClient) Generate(prompt string, model string, context []int, onT
 	if err != nil {
 		return nil, fmt.Errorf("failed to send request: %w", err)
 	}
-	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
 		body, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("Gemini API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
+	// Create buffered channel for streaming response chunks
+	responseChan := make(chan string, 10)
 
-	var geminiResp geminiResponse
-	if err := json.Unmarshal(body, &geminiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	// Check for API error
-	if geminiResp.Error != nil {
-		return nil, fmt.Errorf("Gemini API error: %s", geminiResp.Error.Message)
-	}
-
-	// Create channel for response
-	responseChan := make(chan string, 1)
-
+	// Launch goroutine to process SSE stream
 	go func() {
 		defer close(responseChan)
-		
-		// Extract and report token usage from usageMetadata
-		if onTokenUsage != nil {
-			var inputTokens, outputTokens, totalTokens int
-			if geminiResp.UsageMetadata != nil {
-				inputTokens = geminiResp.UsageMetadata.PromptTokenCount
-				outputTokens = geminiResp.UsageMetadata.CandidatesTokenCount
-				totalTokens = geminiResp.UsageMetadata.TotalTokenCount
+		defer resp.Body.Close()
+
+		var inputTokens, outputTokens, totalTokens int
+
+		scanner := bufio.NewScanner(resp.Body)
+		// Increase scanner buffer for large responses
+		scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+
+			// SSE format: lines starting with "data: " contain JSON
+			if len(line) < 6 || line[:6] != "data: " {
+				continue
 			}
+			data := line[6:]
+
+			var chunk geminiResponse
+			if err := json.Unmarshal([]byte(data), &chunk); err != nil {
+				continue
+			}
+
+			// Check for API error in stream
+			if chunk.Error != nil {
+				responseChan <- fmt.Sprintf("Error: %s", chunk.Error.Message)
+				return
+			}
+
+			// Extract text from candidates
+			if len(chunk.Candidates) > 0 {
+				candidate := chunk.Candidates[0]
+				if len(candidate.Content.Parts) > 0 {
+					text := candidate.Content.Parts[0].Text
+					if text != "" {
+						responseChan <- text
+					}
+				}
+			}
+
+			// Capture token usage from usageMetadata (present in the final chunk)
+			if chunk.UsageMetadata != nil {
+				inputTokens = chunk.UsageMetadata.PromptTokenCount
+				outputTokens = chunk.UsageMetadata.CandidatesTokenCount
+				totalTokens = chunk.UsageMetadata.TotalTokenCount
+			}
+		}
+
+		// Report token usage before goroutine exits
+		if onTokenUsage != nil {
 			onTokenUsage(types.TokenUsage{
 				InputTokens:  inputTokens,
 				OutputTokens: outputTokens,
 				TotalTokens:  totalTokens,
 			})
-		}
-
-		if len(geminiResp.Candidates) > 0 && len(geminiResp.Candidates[0].Content.Parts) > 0 {
-			responseChan <- geminiResp.Candidates[0].Content.Parts[0].Text
 		}
 	}()
 
@@ -172,7 +199,10 @@ func (gc *GeminiClient) Generate(prompt string, model string, context []int, onT
 func (gc *GeminiClient) ListModels() ([]string, error) {
 	return []string{
 		"gemini-2.0-flash-exp",
-		"gemini-1.5-flash",
-		"gemini-1.5-pro",
+		"gemini-2.0-flash",
+		"gemini-2.5-flash-preview",
+		"gemini-2.5-pro-preview",
+		"gemini-3-flash-preview",
+		"gemini-3-pro-preview",
 	}, nil
 }

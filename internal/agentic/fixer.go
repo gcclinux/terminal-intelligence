@@ -499,7 +499,11 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 
 	// Step 3: Call AI client to generate response (Requirement 2.1)
 	f.logInfo("Calling AI model: %s", f.model)
-	responseChan, err := f.aiClient.Generate(prompt, f.model, nil, nil)
+	var tokenUsage types.TokenUsage
+	onTokenUsage := func(usage types.TokenUsage) {
+		tokenUsage = usage
+	}
+	responseChan, err := f.aiClient.Generate(prompt, f.model, nil, onTokenUsage)
 	if err != nil {
 		f.logError("Failed to generate fix: %v", err)
 		return &FixResult{
@@ -530,6 +534,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			ChangesSummary:   "",
 			ErrorMessage:     "AI generated an empty response",
 			IsConversational: false,
+			InputTokens:      tokenUsage.InputTokens,
+			OutputTokens:     tokenUsage.OutputTokens,
+			TotalTokens:      tokenUsage.TotalTokens,
 		}, nil
 	}
 
@@ -547,6 +554,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			ChangesSummary:   "",
 			ErrorMessage:     "AI response did not contain any code blocks",
 			IsConversational: false,
+			InputTokens:      tokenUsage.InputTokens,
+			OutputTokens:     tokenUsage.OutputTokens,
+			TotalTokens:      tokenUsage.TotalTokens,
 		}, nil
 	}
 
@@ -564,6 +574,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			ChangesSummary:   "",
 			ErrorMessage:     "Could not identify valid fix blocks in AI response. The AI may have provided explanations without code, or the code blocks don't match the file type. Please try rephrasing your request.",
 			IsConversational: false,
+			InputTokens:      tokenUsage.InputTokens,
+			OutputTokens:     tokenUsage.OutputTokens,
+			TotalTokens:      tokenUsage.TotalTokens,
 		}, nil
 	}
 
@@ -578,6 +591,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 			ChangesSummary:   "",
 			ErrorMessage:     fmt.Sprintf("Pre-validation failed: %s. Please review your request and try again.", err.Error()),
 			IsConversational: false,
+			InputTokens:      tokenUsage.InputTokens,
+			OutputTokens:     tokenUsage.OutputTokens,
+			TotalTokens:      tokenUsage.TotalTokens,
 		}, nil
 	}
 	f.logDebug("Pre-validation successful")
@@ -605,6 +621,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 				ErrorMessage:     fmt.Sprintf("Failed to apply fix block %d: %s. The generated code may be incomplete or invalid.", i+1, err.Error()),
 				IsConversational: false,
 				PreviewMode:      false,
+				InputTokens:      tokenUsage.InputTokens,
+				OutputTokens:     tokenUsage.OutputTokens,
+				TotalTokens:      tokenUsage.TotalTokens,
 			}, nil
 		}
 	}
@@ -626,6 +645,9 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 		ErrorMessage:     "",
 		IsConversational: false,
 		PreviewMode:      request.PreviewMode,
+		InputTokens:      tokenUsage.InputTokens,
+		OutputTokens:     tokenUsage.OutputTokens,
+		TotalTokens:      tokenUsage.TotalTokens,
 	}, nil
 }
 

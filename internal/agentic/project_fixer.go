@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/user/terminal-intelligence/internal/executor"
+	"github.com/user/terminal-intelligence/internal/types"
 )
 
 // skipDirs is the set of directory names that fileScanner will never descend into.
@@ -65,16 +66,16 @@ func (m *gitIgnoreMatcher) matches(relPath string) bool {
 	if len(m.rules) == 0 {
 		return false
 	}
-	
+
 	normalizedPath := filepath.ToSlash(relPath)
 	parts := strings.Split(normalizedPath, "/")
-	
+
 	for _, rule := range m.rules {
 		isRootOnly := strings.HasPrefix(rule, "/")
 		isDirOnly := strings.HasSuffix(rule, "/")
-		
+
 		cleanRule := strings.Trim(rule, "/")
-		
+
 		// If rule starts with /, it must match at the root level of the project
 		if isRootOnly {
 			if normalizedPath == cleanRule || strings.HasPrefix(normalizedPath, cleanRule+"/") {
@@ -82,7 +83,7 @@ func (m *gitIgnoreMatcher) matches(relPath string) bool {
 			}
 			continue
 		}
-		
+
 		// If it doesn't start with /, it can match any level
 		for _, part := range parts {
 			if part == cleanRule {
@@ -92,7 +93,7 @@ func (m *gitIgnoreMatcher) matches(relPath string) bool {
 				return true
 			}
 		}
-		
+
 		if !isDirOnly {
 			if normalizedPath == cleanRule {
 				return true
@@ -266,7 +267,11 @@ func (rr *relevanceRanker) rank(
 	prompt := rr.buildRankingPrompt(paths, request, maxResults)
 
 	// Call the AI.
-	responseChan, err := rr.aiClient.Generate(prompt, rr.model, nil, nil)
+	var tokenUsage types.TokenUsage
+	onTokenUsage := func(usage types.TokenUsage) {
+		tokenUsage = usage
+	}
+	responseChan, err := rr.aiClient.Generate(prompt, rr.model, nil, onTokenUsage)
 	if err != nil {
 		return nil, nil, fmt.Errorf("relevance ranker AI call failed: %w", err)
 	}
@@ -276,6 +281,7 @@ func (rr *relevanceRanker) rank(
 		sb.WriteString(chunk)
 	}
 	rawResponse := strings.TrimSpace(sb.String())
+	_ = tokenUsage // token usage available for future aggregation
 
 	// Parse the AI response into a list of paths.
 	aiPaths := parseRankedPaths(rawResponse)
@@ -520,7 +526,11 @@ func (me *multiFileEditor) edit(
 	prompt := me.buildEditPrompt(entries, request)
 
 	// ── Step 4: Call AI ───────────────────────────────────────────────────────
-	responseChan, err := me.aiClient.Generate(prompt, me.model, nil, nil)
+	var tokenUsage types.TokenUsage
+	onTokenUsage := func(usage types.TokenUsage) {
+		tokenUsage = usage
+	}
+	responseChan, err := me.aiClient.Generate(prompt, me.model, nil, onTokenUsage)
 	if err != nil {
 		return nil, nil, unreadable, outOfScope, "", fmt.Errorf("AI generate call failed: %w", err)
 	}
@@ -529,6 +539,7 @@ func (me *multiFileEditor) edit(
 		sb.WriteString(chunk)
 	}
 	aiResponse := sb.String()
+	_ = tokenUsage // token usage available for future aggregation
 
 	execCmd = extractExecuteCommand(aiResponse)
 
@@ -568,7 +579,7 @@ func (me *multiFileEditor) edit(
 					entry, ok = entryByRel[absCandidate]
 				}
 			}
-			
+
 			// If not found, check if it's a new file
 			if !ok {
 				hasNewFile := false
@@ -1048,7 +1059,7 @@ func (pf *ProjectFixer) ProcessProjectMessage(
 	for i := 0; i < maxIterations; i++ {
 		callStatus(statusUpdate, fmt.Sprintf("modifying (iteration %d/%d)", i+1, maxIterations))
 		editor := newMultiFileEditor(pf.aiClient, pf.model, pf.fixParser, projectRoot, previewMode)
-		
+
 		mod, fail, unread, outScope, execCmd, editErr := editor.edit(ranked, requestText)
 		if editErr != nil {
 			return nil, fmt.Errorf("multi-file edit failed: %w", editErr)
@@ -1064,16 +1075,16 @@ func (pf *ProjectFixer) ProcessProjectMessage(
 		if execCmd != "" && !previewMode {
 			callStatus(statusUpdate, fmt.Sprintf("executing verification: %s", execCmd))
 			cmdResult, _ := pf.executor.ExecuteCommand(execCmd, projectRoot)
-			
+
 			if cmdResult != nil && cmdResult.ExitCode != 0 {
 				// Execution failed, feedback to AI
-				errorFeedback := fmt.Sprintf("\n\nI ran your verification command `%s` but it failed with exit code %d.\nStdout:\n%s\nStderr:\n%s\nPlease fix the issue and try again.", 
+				errorFeedback := fmt.Sprintf("\n\nI ran your verification command `%s` but it failed with exit code %d.\nStdout:\n%s\nStderr:\n%s\nPlease fix the issue and try again.",
 					execCmd, cmdResult.ExitCode, cmdResult.Stdout, cmdResult.Stderr)
 				requestText += errorFeedback
 				continue // loop to try again
 			}
 		}
-		
+
 		// If no execution command or execution succeeded, we are done
 		break
 	}
