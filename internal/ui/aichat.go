@@ -497,6 +497,15 @@ func (a *AIChatPane) RecordAgenticTokens(inputTokens, outputTokens, totalTokens 
 	a.messages[idx].InputTokens += inputTokens
 	a.messages[idx].OutputTokens += outputTokens
 	a.messages[idx].TotalTokens += totalTokens
+
+	// Append agentic token usage to session log so it's restored on reload
+	if a.sessionFile != "" {
+		f, err := os.OpenFile(a.sessionFile, os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			fmt.Fprintf(f, "agentic-tokens: %d in / %d out / %d total\n\n", inputTokens, outputTokens, totalTokens)
+			f.Close()
+		}
+	}
 }
 
 // DisplayNotification displays a change notification in the chat pane with distinct formatting.
@@ -775,6 +784,9 @@ func (a *AIChatPane) appendMessageToSessionLog(msg types.ChatMessage) {
 	content.WriteString(" ")
 	content.WriteString(msg.Timestamp.Format("15:04:05"))
 	content.WriteString("\n")
+	if msg.InputTokens > 0 || msg.OutputTokens > 0 {
+		content.WriteString(fmt.Sprintf("tokens: %d in / %d out / %d total\n", msg.InputTokens, msg.OutputTokens, msg.TotalTokens))
+	}
 	content.WriteString(msg.Content)
 	content.WriteString("\n\n")
 
@@ -1933,7 +1945,7 @@ func (a *AIChatPane) View() string {
 
 	// Title bar: no border, just background. MarginLeft(1) adds 1 to total.
 	// Response border renders at a.width total. Title should match: Width + margin = a.width
-	titleBar := titleStyle.Width(a.width - 5).MaxWidth(a.width - 1).MarginLeft(1).Render(title)
+	titleBar := titleStyle.Width(a.width - 4).MaxWidth(a.width - 1).MarginLeft(1).Render(title)
 
 	// Create border style for responses with STRICT width enforcement
 	borderStyle := lipgloss.NewStyle().

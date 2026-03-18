@@ -19,6 +19,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -67,7 +68,7 @@ type App struct {
 	agenticFixer              *agentic.AgenticCodeFixer    // Autonomous code fixing orchestrator
 	projectFixer              *agentic.ProjectFixer        // Project-wide agentic fixer
 	agenticProjectFixer       *agentic.AgenticProjectFixer // Project-wide agentic fixer with retry loop
-  autonomousCreator         *agentic.AutonomousCreator   // Autonomous application builder
+	autonomousCreator         *agentic.AutonomousCreator   // Autonomous application builder
 	activePane                types.PaneType               // Currently focused pane
 	width                     int                          // Terminal width
 	height                    int                          // Terminal height
@@ -3268,6 +3269,7 @@ func (a *App) loadChatHistory(content string) error {
 	var currentRole string
 	var currentTimestamp time.Time
 	var currentContent strings.Builder
+	var currentInputTokens, currentOutputTokens, currentTotalTokens int
 
 	for i := 0; i < len(lines); i++ {
 		line := lines[i]
@@ -3281,9 +3283,17 @@ func (a *App) loadChatHistory(content string) error {
 					Content:        strings.TrimSpace(currentContent.String()),
 					Timestamp:      currentTimestamp,
 					IsNotification: currentRole == "notification",
+					InputTokens:    currentInputTokens,
+					OutputTokens:   currentOutputTokens,
+					TotalTokens:    currentTotalTokens,
 				}
 				a.aiPane.messages = append(a.aiPane.messages, msg)
 			}
+
+			// Reset token counts for new message
+			currentInputTokens = 0
+			currentOutputTokens = 0
+			currentTotalTokens = 0
 
 			// Parse new message header
 			parts := strings.SplitN(line, " ", 2)
@@ -3302,6 +3312,64 @@ func (a *App) loadChatHistory(content string) error {
 						parsedTime.Hour(), parsedTime.Minute(), parsedTime.Second(), 0, now.Location())
 				}
 				currentContent.Reset()
+			}
+		} else if strings.HasPrefix(line, "tokens: ") && currentContent.Len() == 0 {
+			// Parse token line: "tokens: 123 in / 456 out / 579 total"
+			tokenStr := strings.TrimPrefix(line, "tokens: ")
+			parts := strings.Split(tokenStr, " / ")
+			if len(parts) == 3 {
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[0], " in")); err == nil {
+					currentInputTokens = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[1], " out")); err == nil {
+					currentOutputTokens = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[2], " total")); err == nil {
+					currentTotalTokens = v
+				}
+			}
+		} else if strings.HasPrefix(line, "agentic-tokens: ") {
+			// Parse agentic token line and add to the last assistant message
+			tokenStr := strings.TrimPrefix(line, "agentic-tokens: ")
+			parts := strings.Split(tokenStr, " / ")
+			if len(parts) == 3 {
+				var at [3]int
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[0], " in")); err == nil {
+					at[0] = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[1], " out")); err == nil {
+					at[1] = v
+				}
+				if v, err := strconv.Atoi(strings.TrimSuffix(parts[2], " total")); err == nil {
+					at[2] = v
+				}
+				// Save any pending message first, then attribute agentic tokens
+				if currentRole != "" && currentContent.Len() > 0 {
+					msg := types.ChatMessage{
+						Role:           currentRole,
+						Content:        strings.TrimSpace(currentContent.String()),
+						Timestamp:      currentTimestamp,
+						IsNotification: currentRole == "notification",
+						InputTokens:    currentInputTokens,
+						OutputTokens:   currentOutputTokens,
+						TotalTokens:    currentTotalTokens,
+					}
+					a.aiPane.messages = append(a.aiPane.messages, msg)
+					currentRole = ""
+					currentContent.Reset()
+					currentInputTokens = 0
+					currentOutputTokens = 0
+					currentTotalTokens = 0
+				}
+				// Add agentic tokens to the last assistant message
+				for j := len(a.aiPane.messages) - 1; j >= 0; j-- {
+					if a.aiPane.messages[j].Role == "assistant" {
+						a.aiPane.messages[j].InputTokens += at[0]
+						a.aiPane.messages[j].OutputTokens += at[1]
+						a.aiPane.messages[j].TotalTokens += at[2]
+						break
+					}
+				}
 			}
 		} else if line == "" && currentContent.Len() > 0 {
 			// Empty line might indicate end of message, but continue accumulating
@@ -3323,6 +3391,9 @@ func (a *App) loadChatHistory(content string) error {
 			Content:        strings.TrimSpace(currentContent.String()),
 			Timestamp:      currentTimestamp,
 			IsNotification: currentRole == "notification",
+			InputTokens:    currentInputTokens,
+			OutputTokens:   currentOutputTokens,
+			TotalTokens:    currentTotalTokens,
 		}
 		a.aiPane.messages = append(a.aiPane.messages, msg)
 	}
@@ -3510,19 +3581,19 @@ func (a *App) replaceAll() {
 	}
 
 	content := a.editorPane.GetContent()
-	
+
 	// Replace all occurrences (case-insensitive search, but preserve case in replacement)
 	searchTerm := a.findBuffer
 	replaceTerm := a.replaceBuffer
-	
+
 	// Simple case-insensitive replace
 	lowerContent := strings.ToLower(content)
 	lowerSearch := strings.ToLower(searchTerm)
-	
+
 	var result strings.Builder
 	lastIndex := 0
 	count := 0
-	
+
 	for {
 		index := strings.Index(lowerContent[lastIndex:], lowerSearch)
 		if index == -1 {
@@ -3530,22 +3601,22 @@ func (a *App) replaceAll() {
 			result.WriteString(content[lastIndex:])
 			break
 		}
-		
+
 		// Append content before the match
 		actualIndex := lastIndex + index
 		result.WriteString(content[lastIndex:actualIndex])
-		
+
 		// Append replacement
 		result.WriteString(replaceTerm)
-		
+
 		// Move past the matched text
 		lastIndex = actualIndex + len(searchTerm)
 		count++
 	}
-	
+
 	// Update the editor content
 	a.editorPane.SetContent(result.String())
-	
+
 	// Save the file
 	if err := a.editorPane.SaveFile(); err != nil {
 		a.statusMessage = fmt.Sprintf("Replaced %d occurrences but save failed: %v", count, err)
