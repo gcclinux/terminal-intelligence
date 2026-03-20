@@ -527,6 +527,42 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case PasteResponseMsg:
+		// Handle pasting the last assistant response into editor
+		responseContent := a.aiPane.GetLastAssistantResponse()
+		if responseContent != "" {
+			if a.editorPane.currentFile != nil {
+				// Append response to current file
+				currentContent := a.editorPane.GetContent()
+				if currentContent != "" {
+					a.editorPane.SetContent(currentContent + "\n" + responseContent)
+				} else {
+					a.editorPane.SetContent(responseContent)
+				}
+
+				err := a.editorPane.SaveFile()
+				if err != nil {
+					a.statusMessage = "Response inserted but save failed: " + err.Error()
+				} else {
+					a.statusMessage = "Response inserted and saved to " + a.editorPane.currentFile.Filepath
+				}
+
+				a.activePane = types.EditorPaneType
+				a.editorPane.focused = true
+				a.aiPane.focused = false
+			} else {
+				// No file open — load response as unsaved buffer
+				a.editorPane.SetContentUnsaved(responseContent, "")
+				a.activePane = types.EditorPaneType
+				a.editorPane.focused = true
+				a.aiPane.focused = false
+				a.statusMessage = "Response loaded — Ctrl+S to save with a filename"
+			}
+		} else {
+			a.statusMessage = "No assistant response to paste"
+		}
+		return a, nil
+
 	case OpenFileInEditorMsg:
 		// Handle file opening from documentation generation
 		err := a.editorPane.LoadFile(msg.FilePath)
@@ -2534,6 +2570,9 @@ func (a *App) View() string {
 		if a.aiPane.IsInViewMode() {
 			// In view mode, show insert instruction
 			statusText += " | Ctrl+P: Insert Code | Esc: Back"
+		} else if !a.aiPane.IsInCopyMode() {
+			// In normal mode, show paste response hint
+			statusText += " | Ctrl+P: Paste Response"
 		}
 	}
 
@@ -2714,7 +2753,7 @@ func (a *App) handleAIMessage(message string) tea.Cmd {
 		helpText += "AI\n"
 		helpText += "--\n"
 		helpText += "  Ctrl+Y    List code blocks (Execute/Insert/Return)\n"
-		helpText += "  Ctrl+P    Insert selected code into editor\n"
+		helpText += "  Ctrl+P    Paste response / Insert code into editor\n"
 		helpText += "  Ctrl+L    Load saved chat from .ti/ folder\n"
 		helpText += "  Ctrl+T    Clear chat / New chat\n\n"
 		helpText += "Navigation\n"

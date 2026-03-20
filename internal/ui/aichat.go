@@ -109,6 +109,10 @@ type InsertCodeMsg struct {
 	EffectiveDir string // The effective working directory for the selected code block
 }
 
+// PasteResponseMsg is sent when user wants to paste the last assistant response into editor.
+// Triggered by Ctrl+P in normal mode (outside view/copy mode) when assistant messages exist.
+type PasteResponseMsg struct{}
+
 // SendAIMessageMsg is sent when user wants to send a message to AI.
 // Triggered by Enter in input area.
 type SendAIMessageMsg struct {
@@ -1415,6 +1419,16 @@ func (a *AIChatPane) handleKeyPress(msg tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
+	if msg.String() == "ctrl+p" {
+		// Paste last assistant response into editor
+		if a.GetLastAssistantResponse() != "" {
+			return func() tea.Msg {
+				return PasteResponseMsg{}
+			}
+		}
+		return nil
+	}
+
 	// Input area active - handle typing
 	now := time.Now()
 	isRapid := now.Sub(a.lastKeystrokeTime) < 25*time.Millisecond
@@ -1927,7 +1941,7 @@ func (a *AIChatPane) View() string {
 	}
 
 	// Add instructions to title
-	title += " | Ctrl+Y: Code | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New"
+	title += " | Ctrl+Y: Code | Ctrl+P: Paste | Ctrl+L: Load | ↑↓: Scroll | Ctrl+T: New"
 
 	titleStyle := lipgloss.NewStyle().
 		Bold(true).
@@ -2349,6 +2363,14 @@ func (a *AIChatPane) GetSuggestedFilename() string {
 //   - bool: True if in view mode, false otherwise
 func (a *AIChatPane) IsInViewMode() bool {
 	return a.viewMode
+}
+
+// IsInCopyMode returns whether the pane is in copy mode (code block selection).
+//
+// Returns:
+//   - bool: True if in copy mode, false otherwise
+func (a *AIChatPane) IsInCopyMode() bool {
+	return a.copyMode
 }
 
 // GetLastAssistantResponse returns the content of the most recent assistant message.
