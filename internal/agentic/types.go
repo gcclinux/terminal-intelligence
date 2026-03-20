@@ -298,3 +298,34 @@ type TestResult struct {
 	Duration time.Duration
 	TimedOut bool
 }
+
+// EditIntent represents the classified intent of a user's edit request.
+// Invariants:
+// - OperationType must be one of: "replace", "append", "insert", "patch"
+// - Confidence must be between 0.0 and 1.0
+// - Keywords contains the matched keywords that contributed to classification
+type EditIntent struct {
+	OperationType string
+	Confidence    float64
+	Keywords      []string
+}
+
+// Validate checks if the EditIntent satisfies its invariants.
+func (ei *EditIntent) Validate() error {
+	validOps := map[string]bool{
+		"replace": true,
+		"append":  true,
+		"insert":  true,
+		"patch":   true,
+	}
+
+	if !validOps[ei.OperationType] {
+		return fmt.Errorf("OperationType must be one of: replace, append, insert, patch; got: %s", ei.OperationType)
+	}
+
+	if ei.Confidence < 0.0 || ei.Confidence > 1.0 {
+		return fmt.Errorf("Confidence must be between 0.0 and 1.0; got: %f", ei.Confidence)
+	}
+
+	return nil
+}

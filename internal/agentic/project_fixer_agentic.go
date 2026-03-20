@@ -15,15 +15,16 @@ import (
 // It coordinates scanning, ranking, fixing, testing, and retry logic across
 // the entire workspace.
 type AgenticProjectFixer struct {
-	aiClient     AIClient
-	model        string
-	fixParser    *FixParser
-	executor     *executor.CommandExecutor
-	logger       *ActionLogger
-	tracker      *AttemptTracker
-	snapshots    *FileSnapshotManager
-	testRunner   *TestRunner
-	langRegistry map[string]LanguageConfig
+	aiClient         AIClient
+	model            string
+	fixParser        *FixParser
+	executor         *executor.CommandExecutor
+	logger           *ActionLogger
+	tracker          *AttemptTracker
+	snapshots        *FileSnapshotManager
+	testRunner       *TestRunner
+	langRegistry     map[string]LanguageConfig
+	intentClassifier *IntentClassifier
 }
 
 // NewAgenticProjectFixer creates a new AgenticProjectFixer with all internal
@@ -36,15 +37,16 @@ func NewAgenticProjectFixer(aiClient AIClient, model string, logger *ActionLogge
 	}
 
 	return &AgenticProjectFixer{
-		aiClient:     aiClient,
-		model:        model,
-		fixParser:    NewFixParser(),
-		executor:     executor.NewCommandExecutor(),
-		logger:       logger,
-		tracker:      NewAttemptTracker(),
-		snapshots:    NewFileSnapshotManager(),
-		testRunner:   NewTestRunner(),
-		langRegistry: registry,
+		aiClient:         aiClient,
+		model:            model,
+		fixParser:        NewFixParser(),
+		executor:         executor.NewCommandExecutor(),
+		logger:           logger,
+		tracker:          NewAttemptTracker(),
+		snapshots:        NewFileSnapshotManager(),
+		testRunner:       NewTestRunner(),
+		langRegistry:     registry,
+		intentClassifier: NewIntentClassifier(),
 	}
 }
 
@@ -181,6 +183,10 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 	// Log session start (Req 6.1).
 	apf.logger.Log("Fix session started: %s", request.Message)
 
+	// ── Step 3b: Classify edit intent (Req 5.1) ─────────────────────────────
+	intent := apf.intentClassifier.Classify(request.Message)
+	apf.logger.Log("Edit intent classified: %s (confidence: %.2f)", intent.OperationType, intent.Confidence)
+
 	// ── Step 4: SCANNING PHASE ───────────────────────────────────────────────
 	callStatus(statusUpdate, "scanning")
 	apf.logger.Log("Scanning project files in %s", request.ProjectRoot)
@@ -295,6 +301,14 @@ func (apf *AgenticProjectFixer) ProcessFixCommand(
 
 		// (c) Build prompt.
 		prompt := apf.buildAgenticPrompt(session, ranked, lastTestResult)
+
+		// (c2) For append intent, add instruction to generate SEARCH/REPLACE patches
+		// that append content rather than replace entire files (Req 5.2).
+		if intent.OperationType == "append" {
+			prompt += "\nIMPORTANT: The user wants to ADD content to existing files, not replace them. " +
+				"Generate SEARCH/REPLACE patches that append new content after existing content. " +
+				"Do NOT remove or replace existing code — only add new code.\n"
+		}
 
 		// (d) Call AI to generate response.
 		var attemptTokens types.TokenUsage

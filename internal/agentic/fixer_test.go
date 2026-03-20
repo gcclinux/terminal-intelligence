@@ -542,7 +542,7 @@ func TestBuildPrompt_BasicStructure(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Check that all required sections are present
 	requiredSections := []string{
@@ -570,7 +570,7 @@ func TestBuildPrompt_ContainsUserMessage(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if !strings.Contains(prompt, userMessage) {
 		t.Errorf("prompt does not contain user message: %s", userMessage)
@@ -588,7 +588,7 @@ func TestBuildPrompt_ContainsFileContent(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if !strings.Contains(prompt, fileContent) {
 		t.Errorf("prompt does not contain file content")
@@ -608,7 +608,7 @@ func TestBuildPrompt_ContainsFileMetadata(t *testing.T) {
 		FileType:    fileType,
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if !strings.Contains(prompt, filePath) {
 		t.Errorf("prompt does not contain file path: %s", filePath)
@@ -629,7 +629,7 @@ func TestBuildPrompt_EmptyFileContent(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should indicate empty file
 	if !strings.Contains(prompt, "(empty file)") {
@@ -647,7 +647,7 @@ func TestBuildPrompt_WhitespaceOnlyFileContent(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should treat whitespace-only as empty
 	if !strings.Contains(prompt, "(empty file)") {
@@ -665,7 +665,7 @@ func TestBuildPrompt_ContainsInstructions(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Check for key instruction elements
 	instructionKeywords := []string{
@@ -693,7 +693,7 @@ func TestBuildPrompt_SectionDelineation(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Check that sections appear in the correct order
 	metadataIndex := strings.Index(prompt, "=== FILE METADATA ===")
@@ -726,7 +726,7 @@ func TestBuildPrompt_DifferentFileTypes(t *testing.T) {
 				FileType:    fileType,
 			}
 
-			prompt := fixer.BuildPrompt(request)
+			prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 			// Should contain the file type
 			if !strings.Contains(prompt, fileType) {
@@ -753,7 +753,7 @@ func TestBuildPrompt_PreservesNewlines(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should preserve newlines in file content
 	if !strings.Contains(prompt, "line1\nline2\nline3") {
@@ -774,7 +774,7 @@ func TestBuildPrompt_HandlesSpecialCharacters(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should contain special characters without escaping
 	if !strings.Contains(prompt, "$USER") {
@@ -808,7 +808,7 @@ func TestBuildPrompt_LongFileContent(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should contain the full content
 	if !strings.Contains(prompt, longContent.String()) {
@@ -828,7 +828,7 @@ func TestBuildPrompt_MultilineUserMessage(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Should preserve multiline user message
 	if !strings.Contains(prompt, userMessage) {
@@ -847,7 +847,7 @@ func TestBuildPrompt_EnsuresNewlineAfterContent(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	prompt := fixer.BuildPrompt(request)
+	prompt := fixer.BuildPrompt(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	// Find the content section
 	contentStart := strings.Index(prompt, "=== CURRENT FILE CONTENT ===")
@@ -1325,7 +1325,7 @@ func TestGenerateFix_GenerateError(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1390,7 +1390,7 @@ func TestGenerateFix_Success(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1438,7 +1438,7 @@ func TestGenerateFix_AIServiceUnavailable(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1479,7 +1479,7 @@ func TestGenerateFix_AIServiceError(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1520,7 +1520,7 @@ func TestGenerateFix_EmptyResponse(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1556,7 +1556,7 @@ func TestGenerateFix_NoCodeBlocks(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1592,7 +1592,7 @@ func TestGenerateFix_InvalidSyntax(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1628,7 +1628,7 @@ func TestGenerateFix_MultipleCodeBlocks(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1684,7 +1684,7 @@ func TestGenerateFix_DifferentFileTypes(t *testing.T) {
 				FileType:    tc.fileType,
 			}
 
-			result, err := fixer.GenerateFix(request)
+			result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -1717,7 +1717,7 @@ func TestGenerateFix_ChangesSummary(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1761,7 +1761,7 @@ func TestGenerateFix_NewFile(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1797,7 +1797,7 @@ func TestGenerateFix_EnsuresNewlineAtEnd(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -1833,7 +1833,7 @@ func TestGenerateFix_ValidatesResult(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2166,7 +2166,7 @@ func TestApplyFix_IntegrationWithGenerateFix(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2209,7 +2209,7 @@ func TestGenerateFix_EmptyFixBlock(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2248,7 +2248,7 @@ func TestGenerateFix_InvalidSyntaxWithHelpfulMessage(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2299,7 +2299,7 @@ func TestGenerateFix_NoFixBlocksWithHelpfulMessage(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2381,7 +2381,7 @@ func TestGenerateFix_ApplyFixErrorWithHelpfulMessage(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2653,7 +2653,7 @@ func TestGenerateFix_UsesOrderedBlocks(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -2731,7 +2731,7 @@ func TestErrorHandling_ValidatesBeforeApplying(t *testing.T) {
 				FileType:    "bash",
 			}
 
-			result, err := fixer.GenerateFix(request)
+			result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 			if err != nil {
 				t.Errorf("unexpected error: %v", err)
@@ -3138,7 +3138,7 @@ func TestGenerateFix_MultipleCodeBlocksAppliedAtomically(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -3184,7 +3184,7 @@ func TestGenerateFix_MultipleCodeBlocksPartialFailure(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -3229,7 +3229,7 @@ func TestGenerateFix_MultipleCodeBlocksAllValid(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -3267,7 +3267,7 @@ func TestGenerateFix_SingleCodeBlockNoMultipleIndicator(t *testing.T) {
 		FileType:    "bash",
 	}
 
-	result, err := fixer.GenerateFix(request)
+	result, err := fixer.GenerateFix(request, EditIntent{OperationType: "patch", Confidence: 0.5})
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)

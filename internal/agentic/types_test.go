@@ -124,10 +124,10 @@ func TestFixResult_Validate(t *testing.T) {
 		{
 			name: "valid successful result",
 			result: FixResult{
-				Success:         true,
-				ModifiedContent: "fixed code",
-				ChangesSummary:  "Fixed the bug",
-				ErrorMessage:    "",
+				Success:          true,
+				ModifiedContent:  "fixed code",
+				ChangesSummary:   "Fixed the bug",
+				ErrorMessage:     "",
 				IsConversational: false,
 			},
 			wantErr: false,
@@ -157,10 +157,10 @@ func TestFixResult_Validate(t *testing.T) {
 		{
 			name: "success without modified content",
 			result: FixResult{
-				Success:         true,
-				ModifiedContent: "",
-				ChangesSummary:  "Fixed the bug",
-				ErrorMessage:    "",
+				Success:          true,
+				ModifiedContent:  "",
+				ChangesSummary:   "Fixed the bug",
+				ErrorMessage:     "",
 				IsConversational: false,
 			},
 			wantErr: true,
@@ -168,10 +168,10 @@ func TestFixResult_Validate(t *testing.T) {
 		{
 			name: "success without changes summary",
 			result: FixResult{
-				Success:         true,
-				ModifiedContent: "fixed code",
-				ChangesSummary:  "",
-				ErrorMessage:    "",
+				Success:          true,
+				ModifiedContent:  "fixed code",
+				ChangesSummary:   "",
+				ErrorMessage:     "",
 				IsConversational: false,
 			},
 			wantErr: true,
@@ -527,6 +527,80 @@ func TestFixSessionRequest_Validate(t *testing.T) {
 			err := tt.request.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("FixSessionRequest.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestEditIntent_Validate tests the validation of EditIntent
+func TestEditIntent_Validate(t *testing.T) {
+	tests := []struct {
+		name    string
+		intent  EditIntent
+		wantErr bool
+	}{
+		{
+			name:    "valid replace intent",
+			intent:  EditIntent{OperationType: "replace", Confidence: 0.9, Keywords: []string{"replace"}},
+			wantErr: false,
+		},
+		{
+			name:    "valid append intent",
+			intent:  EditIntent{OperationType: "append", Confidence: 0.8, Keywords: []string{"add"}},
+			wantErr: false,
+		},
+		{
+			name:    "valid insert intent",
+			intent:  EditIntent{OperationType: "insert", Confidence: 0.85, Keywords: []string{"insert"}},
+			wantErr: false,
+		},
+		{
+			name:    "valid patch intent",
+			intent:  EditIntent{OperationType: "patch", Confidence: 1.0, Keywords: nil},
+			wantErr: false,
+		},
+		{
+			name:    "confidence at lower bound",
+			intent:  EditIntent{OperationType: "patch", Confidence: 0.0},
+			wantErr: false,
+		},
+		{
+			name:    "confidence at upper bound",
+			intent:  EditIntent{OperationType: "patch", Confidence: 1.0},
+			wantErr: false,
+		},
+		{
+			name:    "invalid operation type",
+			intent:  EditIntent{OperationType: "delete", Confidence: 0.5},
+			wantErr: true,
+		},
+		{
+			name:    "empty operation type",
+			intent:  EditIntent{OperationType: "", Confidence: 0.5},
+			wantErr: true,
+		},
+		{
+			name:    "confidence below zero",
+			intent:  EditIntent{OperationType: "patch", Confidence: -0.1},
+			wantErr: true,
+		},
+		{
+			name:    "confidence above one",
+			intent:  EditIntent{OperationType: "patch", Confidence: 1.1},
+			wantErr: true,
+		},
+		{
+			name:    "invalid operation type and out-of-range confidence",
+			intent:  EditIntent{OperationType: "unknown", Confidence: 2.0},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.intent.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("EditIntent.Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}

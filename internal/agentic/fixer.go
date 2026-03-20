@@ -66,10 +66,12 @@ type AIClient interface {
 //   - Invalid fixes: Validates before applying, returns explanation on failure
 //   - Application failures: Preserves original content and notifies user
 type AgenticCodeFixer struct {
-	aiClient  AIClient   // The AI client for generating fixes
-	model     string     // The AI model to use for generation
-	fixParser *FixParser // Parser for extracting and validating fixes
-	debug     bool       // Enable debug logging
+	aiClient         AIClient          // The AI client for generating fixes
+	model            string            // The AI model to use for generation
+	fixParser        *FixParser        // Parser for extracting and validating fixes
+	intentClassifier *IntentClassifier // Classifier for detecting edit intent
+	contentMerger    *ContentMerger    // Merger for content-preserving operations
+	debug            bool              // Enable debug logging
 }
 
 // NewAgenticCodeFixer creates a new agentic code fixer
@@ -80,10 +82,12 @@ type AgenticCodeFixer struct {
 // Returns a configured AgenticCodeFixer instance
 func NewAgenticCodeFixer(aiClient AIClient, model string) *AgenticCodeFixer {
 	return &AgenticCodeFixer{
-		aiClient:  aiClient,
-		model:     model,
-		fixParser: NewFixParser(),
-		debug:     false, // Debug logging disabled by default
+		aiClient:         aiClient,
+		model:            model,
+		fixParser:        NewFixParser(),
+		intentClassifier: NewIntentClassifier(),
+		contentMerger:    NewContentMerger(),
+		debug:            false, // Debug logging disabled by default
 	}
 }
 
@@ -300,7 +304,7 @@ func (f *AgenticCodeFixer) ExtractSearchTerms(message string) ([]string, error) 
 // 5. Output format instructions
 //
 // Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 1.5
-func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
+func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest, intent EditIntent) string {
 	var prompt strings.Builder
 
 	// Section 1: System instructions
@@ -317,7 +321,7 @@ func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 	prompt.WriteString(request.FileType)
 	prompt.WriteString("\n\n")
 
-	// Section 3: Current file content
+	// Section 3: Current file content (always included regardless of intent, Req 2.5)
 	prompt.WriteString("=== CURRENT FILE CONTENT ===\n")
 	if strings.TrimSpace(request.FileContent) == "" {
 		prompt.WriteString("(empty file)\n")
@@ -335,18 +339,59 @@ func (f *AgenticCodeFixer) BuildPrompt(request *FixRequest) string {
 	prompt.WriteString(request.UserMessage)
 	prompt.WriteString("\n\n")
 
-	// Section 5: Output format instructions
+	// Section 5: Output format instructions (intent-specific)
 	prompt.WriteString("=== INSTRUCTIONS ===\n")
-	prompt.WriteString("1. Analyze the user's request and the current file content\n")
-	prompt.WriteString("2. Generate the complete fixed code\n")
-	prompt.WriteString("3. Wrap your code in a markdown code block with the appropriate language identifier\n")
-	prompt.WriteString("4. Use this format:\n")
-	prompt.WriteString("```")
-	prompt.WriteString(request.FileType)
-	prompt.WriteString("\n")
-	prompt.WriteString("(your fixed code here)\n")
-	prompt.WriteString("```\n")
-	prompt.WriteString("5. Provide a brief explanation of the changes you made\n")
+
+	switch intent.OperationType {
+	case "append":
+		// Req 2.1: append intent instructs LLM to generate only new content
+		prompt.WriteString("Generate ONLY the new content to append after the existing file. Do NOT repeat existing content.\n")
+		prompt.WriteString("Wrap your code in a markdown code block with the appropriate language identifier.\n")
+		prompt.WriteString("Use this format:\n")
+		prompt.WriteString("```")
+		prompt.WriteString(request.FileType)
+		prompt.WriteString("\n")
+		prompt.WriteString("(new content to append)\n")
+		prompt.WriteString("```\n")
+
+	case "insert":
+		// Req 2.2: insert intent instructs LLM to generate new content with anchor line
+		prompt.WriteString("Generate ONLY the new content to insert. On the first line, output the anchor line (an existing line after which the new content should be placed), then the new content.\n")
+		prompt.WriteString("Wrap your code in a markdown code block with the appropriate language identifier.\n")
+		prompt.WriteString("Use this format:\n")
+		prompt.WriteString("```")
+		prompt.WriteString(request.FileType)
+		prompt.WriteString("\n")
+		prompt.WriteString("(anchor line from existing file)\n")
+		prompt.WriteString("(new content to insert)\n")
+		prompt.WriteString("```\n")
+
+	case "replace":
+		// Req 2.3: replace intent uses full replacement behavior
+		prompt.WriteString("1. Analyze the user's request and the current file content\n")
+		prompt.WriteString("2. Generate the complete fixed code\n")
+		prompt.WriteString("3. Wrap your code in a markdown code block with the appropriate language identifier\n")
+		prompt.WriteString("4. Use this format:\n")
+		prompt.WriteString("```")
+		prompt.WriteString(request.FileType)
+		prompt.WriteString("\n")
+		prompt.WriteString("(your fixed code here)\n")
+		prompt.WriteString("```\n")
+		prompt.WriteString("5. Provide a brief explanation of the changes you made\n")
+
+	default:
+		// Req 2.4: patch intent (and unknown types) use existing SEARCH/REPLACE format
+		prompt.WriteString("1. Analyze the user's request and the current file content\n")
+		prompt.WriteString("2. Generate the complete fixed code\n")
+		prompt.WriteString("3. Wrap your code in a markdown code block with the appropriate language identifier\n")
+		prompt.WriteString("4. Use this format:\n")
+		prompt.WriteString("```")
+		prompt.WriteString(request.FileType)
+		prompt.WriteString("\n")
+		prompt.WriteString("(your fixed code here)\n")
+		prompt.WriteString("```\n")
+		prompt.WriteString("5. Provide a brief explanation of the changes you made\n")
+	}
 
 	return prompt.String()
 }
@@ -458,8 +503,12 @@ func (f *AgenticCodeFixer) ProcessMessage(
 
 	f.logInfo("Fix request validated, proceeding to generate fix")
 
-	// Step 6: Route to fix generation handler
-	return f.GenerateFix(request)
+	// Step 6: Classify edit intent (Requirement 4.1, 4.2)
+	intent := f.intentClassifier.Classify(actualMessage)
+	f.logInfo("Edit intent classified: %s (confidence: %.2f)", intent.OperationType, intent.Confidence)
+
+	// Step 7: Route to fix generation handler
+	return f.GenerateFix(request, intent)
 }
 
 // GenerateFix generates a code fix using the AI model
@@ -474,7 +523,7 @@ func (f *AgenticCodeFixer) ProcessMessage(
 //   - error: Error if something went wrong during generation
 //
 // Requirements: 2.1, 3.1, 3.2, 3.4
-func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) {
+func (f *AgenticCodeFixer) GenerateFix(request *FixRequest, intent EditIntent) (*FixResult, error) {
 	f.logInfo("Generating fix for file: %s", request.FilePath)
 
 	// Step 1: Check if AI service is available (Requirement 7.2)
@@ -494,7 +543,7 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 
 	// Step 2: Construct prompt using prompt builder (Requirement 2.1)
 	f.logDebug("Building prompt for AI model")
-	prompt := f.BuildPrompt(request)
+	prompt := f.BuildPrompt(request, intent)
 	f.logDebug("Prompt built successfully (length: %d chars)", len(prompt))
 
 	// Step 3: Call AI client to generate response (Requirement 2.1)
@@ -602,29 +651,53 @@ func (f *AgenticCodeFixer) GenerateFix(request *FixRequest) (*FixResult, error) 
 	f.logDebug("Ordering fix blocks for application")
 	orderedFixBlocks := f.orderFixBlocks(fixBlocks)
 
-	// Step 9: Apply all fixes atomically (Requirement 10.1, 10.3)
-	// For preview mode, we generate the modified content but don't actually apply it
-	// For multiple blocks, we apply them in the determined order
-	// If any application fails, we return an error (atomicity is handled by ApplyFix's transactional approach)
-	f.logInfo("Applying %d fix blocks (preview mode: %v)", len(orderedFixBlocks), request.PreviewMode)
+	// Step 9: Apply all fixes (Requirement 10.1, 10.3, 4.3, 4.4, 4.5)
+	// For append/insert intents, use ContentMerger to preserve existing content.
+	// For replace/patch intents, use the existing ApplyFix whole-file replacement.
+	f.logInfo("Applying %d fix blocks (preview mode: %v, intent: %s)", len(orderedFixBlocks), request.PreviewMode, intent.OperationType)
 	modifiedContent := request.FileContent
-	for i, fixBlock := range orderedFixBlocks {
-		f.logDebug("Applying fix block %d/%d", i+1, len(orderedFixBlocks))
-		var err error
-		modifiedContent, err = f.ApplyFix(modifiedContent, fixBlock.Code, request.FileType)
-		if err != nil {
-			f.logError("Failed to apply fix block %d: %v", i+1, err)
-			return &FixResult{
-				Success:          false,
-				ModifiedContent:  "",
-				ChangesSummary:   "",
-				ErrorMessage:     fmt.Sprintf("Failed to apply fix block %d: %s. The generated code may be incomplete or invalid.", i+1, err.Error()),
-				IsConversational: false,
-				PreviewMode:      false,
-				InputTokens:      tokenUsage.InputTokens,
-				OutputTokens:     tokenUsage.OutputTokens,
-				TotalTokens:      tokenUsage.TotalTokens,
-			}, nil
+
+	if intent.OperationType == "append" || intent.OperationType == "insert" {
+		// Content-preserving merge: use ContentMerger for additive operations
+		for i, fixBlock := range orderedFixBlocks {
+			f.logDebug("Merging fix block %d/%d via ContentMerger (%s)", i+1, len(orderedFixBlocks), intent.OperationType)
+			var err error
+			modifiedContent, err = f.contentMerger.Merge(modifiedContent, fixBlock.Code, intent)
+			if err != nil {
+				f.logError("Failed to merge fix block %d: %v", i+1, err)
+				return &FixResult{
+					Success:          false,
+					ModifiedContent:  "",
+					ChangesSummary:   "",
+					ErrorMessage:     fmt.Sprintf("Failed to merge fix block %d: %s.", i+1, err.Error()),
+					IsConversational: false,
+					PreviewMode:      false,
+					InputTokens:      tokenUsage.InputTokens,
+					OutputTokens:     tokenUsage.OutputTokens,
+					TotalTokens:      tokenUsage.TotalTokens,
+				}, nil
+			}
+		}
+	} else {
+		// Whole-file replacement: existing behavior for replace/patch
+		for i, fixBlock := range orderedFixBlocks {
+			f.logDebug("Applying fix block %d/%d", i+1, len(orderedFixBlocks))
+			var err error
+			modifiedContent, err = f.ApplyFix(modifiedContent, fixBlock.Code, request.FileType)
+			if err != nil {
+				f.logError("Failed to apply fix block %d: %v", i+1, err)
+				return &FixResult{
+					Success:          false,
+					ModifiedContent:  "",
+					ChangesSummary:   "",
+					ErrorMessage:     fmt.Sprintf("Failed to apply fix block %d: %s. The generated code may be incomplete or invalid.", i+1, err.Error()),
+					IsConversational: false,
+					PreviewMode:      false,
+					InputTokens:      tokenUsage.InputTokens,
+					OutputTokens:     tokenUsage.OutputTokens,
+					TotalTokens:      tokenUsage.TotalTokens,
+				}, nil
+			}
 		}
 	}
 	f.logInfo("All fix blocks applied successfully")

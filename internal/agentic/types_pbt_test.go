@@ -33,8 +33,8 @@ func TestProperty18_FixSessionDataStructureCompleteness(t *testing.T) {
 			attemptTS := time.Unix(rapid.Int64Range(1, 4102444800).Draw(t, "attemptTS"), 0)
 
 			attempts[i] = FixAttempt{
-				Number:    i + 1,
-				Cycle:     rapid.IntRange(0, 2).Draw(t, "cycle"),
+				Number: i + 1,
+				Cycle:  rapid.IntRange(0, 2).Draw(t, "cycle"),
 				Strategy: Strategy{
 					Description: stratDesc,
 					Prompt:      stratPrompt,
@@ -97,6 +97,101 @@ func TestProperty18_FixSessionDataStructureCompleteness(t *testing.T) {
 				t.Fatalf("Attempt[%d].Strategy.Prompt is empty", idx)
 			}
 			// AIResponse can be empty, but the field must be a valid string (type check is compile-time).
+		}
+	})
+}
+
+// Feature: content-preserving-file-updates, Property 4: Classifier always returns valid EditIntent
+// For any EditIntent with OperationType in {"replace","append","insert","patch"} and Confidence in [0.0, 1.0],
+// Validate() returns nil.
+// **Validates: Requirements 1.5, 6.1, 6.2**
+func TestProperty4_ClassifierAlwaysReturnsValidEditIntent(t *testing.T) {
+	validOps := []string{"replace", "append", "insert", "patch"}
+
+	rapid.Check(t, func(t *rapid.T) {
+		opType := rapid.SampledFrom(validOps).Draw(t, "operationType")
+		confidence := rapid.Float64Range(0.0, 1.0).Draw(t, "confidence")
+
+		// Generate random keywords (0-5 entries).
+		numKeywords := rapid.IntRange(0, 5).Draw(t, "numKeywords")
+		keywords := make([]string, numKeywords)
+		for i := range numKeywords {
+			keywords[i] = rapid.StringMatching(`[a-z]{1,15}`).Draw(t, "keyword")
+		}
+
+		intent := EditIntent{
+			OperationType: opType,
+			Confidence:    confidence,
+			Keywords:      keywords,
+		}
+
+		// Property: any EditIntent with valid OperationType and valid Confidence passes Validate().
+		if err := intent.Validate(); err != nil {
+			t.Fatalf("EditIntent.Validate() should return nil for valid inputs (op=%q, conf=%f), got: %v",
+				opType, confidence, err)
+		}
+	})
+}
+
+// Feature: content-preserving-file-updates, Property 5: EditIntent validation rejects invalid inputs
+// For any EditIntent with OperationType NOT in {"replace","append","insert","patch"} OR Confidence outside [0.0, 1.0],
+// Validate() returns non-nil error.
+// **Validates: Requirements 6.4, 6.5**
+func TestProperty5_EditIntentValidationRejectsInvalidInputs(t *testing.T) {
+	validOps := map[string]bool{
+		"replace": true,
+		"append":  true,
+		"insert":  true,
+		"patch":   true,
+	}
+
+	rapid.Check(t, func(t *rapid.T) {
+		// Decide which invariant to violate: 0 = invalid OperationType, 1 = invalid Confidence, 2 = both.
+		violationType := rapid.IntRange(0, 2).Draw(t, "violationType")
+
+		var opType string
+		var confidence float64
+
+		switch violationType {
+		case 0:
+			// Invalid OperationType, valid Confidence.
+			opType = rapid.StringMatching(`[a-z]{1,20}`).
+				Filter(func(s string) bool { return !validOps[s] }).
+				Draw(t, "invalidOpType")
+			confidence = rapid.Float64Range(0.0, 1.0).Draw(t, "validConfidence")
+
+		case 1:
+			// Valid OperationType, invalid Confidence.
+			validOpSlice := []string{"replace", "append", "insert", "patch"}
+			opType = rapid.SampledFrom(validOpSlice).Draw(t, "validOpType")
+			// Generate confidence outside [0.0, 1.0].
+			if rapid.Bool().Draw(t, "negativeConfidence") {
+				confidence = -rapid.Float64Range(0.01, 1000.0).Draw(t, "negConf")
+			} else {
+				confidence = 1.0 + rapid.Float64Range(0.01, 1000.0).Draw(t, "highConf")
+			}
+
+		case 2:
+			// Both invalid.
+			opType = rapid.StringMatching(`[a-z]{1,20}`).
+				Filter(func(s string) bool { return !validOps[s] }).
+				Draw(t, "invalidOpType2")
+			if rapid.Bool().Draw(t, "negativeConfidence2") {
+				confidence = -rapid.Float64Range(0.01, 1000.0).Draw(t, "negConf2")
+			} else {
+				confidence = 1.0 + rapid.Float64Range(0.01, 1000.0).Draw(t, "highConf2")
+			}
+		}
+
+		intent := EditIntent{
+			OperationType: opType,
+			Confidence:    confidence,
+		}
+
+		// Property: Validate() must return a non-nil error for any invalid input.
+		if err := intent.Validate(); err == nil {
+			t.Fatalf("EditIntent.Validate() should return error for invalid inputs (op=%q, conf=%f), but got nil",
+				opType, confidence)
 		}
 	})
 }
