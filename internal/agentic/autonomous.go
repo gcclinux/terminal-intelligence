@@ -190,7 +190,9 @@ IMPORTANT RULES:
 - Use the programming language the user requested. If no language is specified, choose the most appropriate one.
 - If the user asks for a web application, you MUST include both frontend AND backend folders with complete implementations.
 - List every single file that will be created — do not summarize with "..." or "etc".
-- The project name MUST appear as "Project Name: <name>" on its own line.`, c.Description)
+- The project name MUST appear as "Project Name: <name>" on its own line.
+- For Go projects: place go.mod at the PROJECT ROOT, not inside a subdirectory. Embed static assets (HTML/CSS/JS) directly in the Go binary or serve them from a subfolder — do NOT create a separate backend/ folder with its own go.mod.
+- Keep the project structure as FLAT as possible. Avoid unnecessary nesting unless the project genuinely requires multiple independent modules.`, c.Description)
 
 	plan, err := c.aicallAndTrack(prompt)
 	if err != nil {
@@ -288,8 +290,9 @@ Rules:
 
 	cmdsStr = cleanAIResponse(cmdsStr)
 
-	// Safety: strip "go mod init" if go.mod already exists
-	goModPath := filepath.Join(c.ProjectDir, "go.mod")
+	// Safety: strip "go mod init" if go.mod already exists (check build root too)
+	buildRoot := c.findBuildRoot()
+	goModPath := filepath.Join(buildRoot, "go.mod")
 	if _, statErr := os.Stat(goModPath); statErr == nil {
 		cmdsStr = stripGoModInit(cmdsStr)
 	}
@@ -1090,16 +1093,74 @@ func (c *AutonomousCreator) buildCodeContextFromDisk() string {
 	return sb.String()
 }
 
-// runShellCmd executes a shell command in the project directory and returns output.
-func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
+// findBuildRoot locates the actual directory containing the project's build
+// manifest (go.mod, package.json, requirements.txt, pyproject.toml, Cargo.toml,
+// pom.xml, build.gradle). If the manifest is not at the project root but exists
+// in exactly one immediate subdirectory, that subdirectory is returned.
+// Otherwise it returns c.ProjectDir unchanged.
+func (c *AutonomousCreator) findBuildRoot() string {
+	manifests := []string{
+		"go.mod", "package.json", "requirements.txt",
+		"pyproject.toml", "Cargo.toml", "pom.xml", "build.gradle",
+	}
+
+	// Check project root first.
+	for _, m := range manifests {
+		if _, err := os.Stat(filepath.Join(c.ProjectDir, m)); err == nil {
+			return c.ProjectDir
+		}
+	}
+
+	// Scan immediate subdirectories for a single manifest match.
+	entries, err := os.ReadDir(c.ProjectDir)
+	if err != nil {
+		return c.ProjectDir
+	}
+
+	var candidate string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		subDir := filepath.Join(c.ProjectDir, entry.Name())
+		for _, m := range manifests {
+			if _, err := os.Stat(filepath.Join(subDir, m)); err == nil {
+				if candidate != "" && candidate != subDir {
+					// Multiple subdirectories have manifests — ambiguous, stay at root.
+					return c.ProjectDir
+				}
+				candidate = subDir
+				break
+			}
+		}
+	}
+
+	if candidate != "" {
+		if c.logger != nil {
+			rel, _ := filepath.Rel(c.ProjectDir, candidate)
+			c.logger.Log("Build root detected in subdirectory: %s", rel)
+		}
+		return candidate
+	}
+	return c.ProjectDir
+}
+
+// runShellCmdIn executes a shell command in the given directory and returns output.
+func (c *AutonomousCreator) runShellCmdIn(cmdStr, dir string) ([]byte, error) {
 	var cmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		cmd = exec.Command("cmd", "/C", cmdStr)
 	} else {
 		cmd = exec.Command("bash", "-c", cmdStr)
 	}
-	cmd.Dir = c.ProjectDir
+	cmd.Dir = dir
 	return cmd.CombinedOutput()
+}
+
+// runShellCmd executes a shell command in the project directory and returns output.
+// It auto-detects the build root so commands run where the build manifest lives.
+func (c *AutonomousCreator) runShellCmd(cmdStr string) ([]byte, error) {
+	return c.runShellCmdIn(cmdStr, c.findBuildRoot())
 }
 
 // aiDrivenFix asks the AI to analyze an error, fix the code, and retry the command.
@@ -1279,7 +1340,7 @@ func (c *AutonomousCreator) smokeTestServer(runCmd, port string) (string, error)
 	} else {
 		serverCmd = exec.Command("bash", "-c", runCmd)
 	}
-	serverCmd.Dir = c.ProjectDir
+	serverCmd.Dir = c.findBuildRoot()
 	setProcGroupAttr(serverCmd)
 
 	var stdoutBuf, stderrBuf strings.Builder
@@ -1336,24 +1397,25 @@ func (c *AutonomousCreator) smokeTestServer(runCmd, port string) (string, error)
 // launchInTerminal attempts to start a command in a new terminal window.
 // Returns true if successful.
 func (c *AutonomousCreator) launchInTerminal(cmdStr string) bool {
+	buildRoot := c.findBuildRoot()
 	var runCmd *exec.Cmd
 	if runtime.GOOS == "windows" {
 		runCmd = exec.Command("cmd", "/c", "start", "cmd", "/k", cmdStr)
-		runCmd.Dir = c.ProjectDir
+		runCmd.Dir = buildRoot
 	} else if runtime.GOOS == "darwin" {
-		script := fmt.Sprintf("cd '%s' && %s", c.ProjectDir, cmdStr)
+		script := fmt.Sprintf("cd '%s' && %s", buildRoot, cmdStr)
 		runCmd = exec.Command("osascript", "-e",
 			fmt.Sprintf("tell application \"Terminal\" to do script \"%s\"", script))
 	} else if _, err := exec.LookPath("gnome-terminal"); err == nil {
 		runCmd = exec.Command("gnome-terminal", "--", "bash", "-c", cmdStr)
-		runCmd.Dir = c.ProjectDir
+		runCmd.Dir = buildRoot
 	} else if _, err := exec.LookPath("xterm"); err == nil {
 		runCmd = exec.Command("xterm", "-e", "bash", "-c", cmdStr)
-		runCmd.Dir = c.ProjectDir
+		runCmd.Dir = buildRoot
 	} else {
 		// Fallback: run in background
 		bgCmd := exec.Command("bash", "-c", cmdStr)
-		bgCmd.Dir = c.ProjectDir
+		bgCmd.Dir = buildRoot
 		if err := bgCmd.Start(); err != nil {
 			return false
 		}
@@ -1364,7 +1426,7 @@ func (c *AutonomousCreator) launchInTerminal(cmdStr string) bool {
 	if err := runCmd.Start(); err != nil {
 		// Fallback to background
 		bgCmd := exec.Command("bash", "-c", cmdStr)
-		bgCmd.Dir = c.ProjectDir
+		bgCmd.Dir = buildRoot
 		if err := bgCmd.Start(); err != nil {
 			return false
 		}

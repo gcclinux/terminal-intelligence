@@ -1,6 +1,7 @@
 package agentic
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -189,9 +190,6 @@ func main() {
 		})
 	}
 }
-
-
-
 
 func TestExtractProjectName(t *testing.T) {
 	tests := []struct {
@@ -429,4 +427,107 @@ func TestExtractFileFromError_NoMatch(t *testing.T) {
 	if got != "" {
 		t.Fatalf("extractFileFromError(%q, %q) = %q, want empty string", errorOutput, projectDir, got)
 	}
+}
+
+// TestFindBuildRoot verifies that findBuildRoot correctly locates the directory
+// containing the build manifest (go.mod, package.json, etc.), even when it
+// lives in a subdirectory rather than the project root.
+func TestFindBuildRoot(t *testing.T) {
+	tests := []struct {
+		name     string
+		files    map[string]string // relative paths to create
+		expected string            // expected suffix of the returned path
+	}{
+		{
+			name: "go.mod at project root",
+			files: map[string]string{
+				"go.mod":  "module test",
+				"main.go": "package main",
+			},
+			expected: "", // project root itself
+		},
+		{
+			name: "go.mod in backend subdirectory",
+			files: map[string]string{
+				"backend/go.mod":      "module test",
+				"backend/main.go":     "package main",
+				"frontend/index.html": "<html></html>",
+			},
+			expected: "backend",
+		},
+		{
+			name: "package.json in subdirectory",
+			files: map[string]string{
+				"app/package.json": `{"name":"test"}`,
+				"app/index.js":     "console.log('hi')",
+			},
+			expected: "app",
+		},
+		{
+			name: "no manifest anywhere returns project root",
+			files: map[string]string{
+				"main.go": "package main",
+				"util.go": "package main",
+			},
+			expected: "",
+		},
+		{
+			name: "multiple subdirs with manifests returns project root (ambiguous)",
+			files: map[string]string{
+				"svc1/go.mod":       "module svc1",
+				"svc2/package.json": `{"name":"svc2"}`,
+			},
+			expected: "", // ambiguous, falls back to root
+		},
+		{
+			name: "requirements.txt in subdirectory",
+			files: map[string]string{
+				"api/requirements.txt": "flask",
+				"api/app.py":           "print('hi')",
+			},
+			expected: "api",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+
+			// Create the file structure
+			for relPath, content := range tt.files {
+				absPath := filepath.Join(tmpDir, filepath.FromSlash(relPath))
+				dir := filepath.Dir(absPath)
+				if err := mkdirAll(dir); err != nil {
+					t.Fatalf("failed to create dir %s: %v", dir, err)
+				}
+				if err := writeFile(absPath, content); err != nil {
+					t.Fatalf("failed to write %s: %v", relPath, err)
+				}
+			}
+
+			creator := &AutonomousCreator{
+				ProjectDir: tmpDir,
+			}
+
+			got := creator.findBuildRoot()
+			want := tmpDir
+			if tt.expected != "" {
+				want = filepath.Join(tmpDir, tt.expected)
+			}
+
+			if got != want {
+				t.Errorf("findBuildRoot() = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+// mkdirAll is a test helper that creates directories.
+func mkdirAll(path string) error {
+	return os.MkdirAll(path, 0755)
+}
+
+// writeFile is a test helper that writes content to a file.
+func writeFile(path, content string) error {
+	return os.WriteFile(path, []byte(content), 0644)
 }
