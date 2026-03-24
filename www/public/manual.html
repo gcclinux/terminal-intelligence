@@ -215,10 +215,10 @@
 
 <body>
     <nav>
-        <a href="/" class="logo">
+        <a href="./" class="logo">
             <span>&gt;_</span> TI
         </a>
-        <a href="/" class="btn-back">← Back to Home</a>
+        <a href="./" class="btn-back">← Back to Home</a>
     </nav>
     <main>
         <div id="content" class="markdown-body">
@@ -227,7 +227,7 @@
     </main>
     <script>
         // Fetch and parse the markdown document
-        fetch('/docs/TUTORIAL_MANUAL.md')
+        fetch('docs/TUTORIAL_MANUAL.md')
             .then(response => {
                 if (!response.ok) {
                     throw new Error('Could not load the manual. Status: ' + response.status);
