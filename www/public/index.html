@@ -1,0 +1,734 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terminal Intelligence | AI-Powered CLI IDE</title>
+    <meta name="description"
+        content="Terminal Intelligence is a lightweight CLI-based IDE with integrated AI assistance, built for speed and productivity.">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600&family=Inter:wght@300;400;600;800&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #09090b;
+            --bg-card: rgba(24, 24, 27, 0.7);
+            --text-main: #f8fafc;
+            --text-muted: #94a3b8;
+            --accent-primary: #38bdf8;
+            --accent-secondary: #818cf8;
+            --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            --border-color: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        /* Nav */
+        nav {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 1.5rem 5%;
+            position: fixed;
+            width: 100%;
+            top: 0;
+            z-index: 100;
+            background: rgba(9, 9, 11, 0.8);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .logo {
+            font-family: 'Fira Code', monospace;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--text-main);
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .logo span {
+            color: var(--accent-primary);
+        }
+
+        .nav-links {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .nav-links a {
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.3s ease;
+            font-size: 0.95rem;
+            font-weight: 400;
+        }
+
+        .nav-links a:hover {
+            color: var(--accent-primary);
+        }
+
+        .btn {
+            background: var(--accent-gradient);
+            color: white;
+            padding: 0.6rem 1.5rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: opacity 0.3s hover, transform 0.2s;
+            border: none;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(56, 189, 248, 0.2);
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+            transform: translateY(-2px);
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--accent-primary);
+            color: var(--accent-primary);
+            box-shadow: none;
+        }
+
+        .btn-outline:hover {
+            background: rgba(56, 189, 248, 0.1);
+            transform: translateY(-2px);
+        }
+
+        /* Hero */
+        header {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            padding: 8rem 5% 4rem;
+            position: relative;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: -10%;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(56, 189, 248, 0.15) 0%, rgba(9, 9, 11, 0) 70%);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .hero-badge {
+            display: inline-block;
+            padding: 0.4rem 1rem;
+            background: rgba(129, 140, 248, 0.1);
+            border: 1px solid rgba(129, 140, 248, 0.3);
+            border-radius: 50px;
+            color: var(--accent-secondary);
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            letter-spacing: 0.5px;
+        }
+
+        h1 {
+            font-size: clamp(2.5rem, 6vw, 5rem);
+            font-weight: 800;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            background: linear-gradient(to right, #ffffff, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        h1 span {
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .hero-desc {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+            max-width: 600px;
+            margin: 0 auto 3rem;
+        }
+
+        .hero-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            margin-bottom: 4rem;
+        }
+
+        .hero-image-wrapper {
+            position: relative;
+            max-width: 1000px;
+            width: 100%;
+            margin: 0 auto;
+            border-radius: 12px;
+            padding: 1px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.02));
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.6), 0 0 40px rgba(56, 189, 248, 0.1);
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .hero-image-wrapper img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 11px;
+            background: #000;
+        }
+
+        @keyframes float {
+
+            0%,
+            100% {
+                transform: translateY(0);
+            }
+
+            50% {
+                transform: translateY(-15px);
+            }
+        }
+
+        /* Features Section */
+        section {
+            padding: 6rem 5%;
+        }
+
+        .section-title {
+            text-align: center;
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .section-subtitle {
+            text-align: center;
+            color: var(--text-muted);
+            margin-bottom: 4rem;
+            font-size: 1.1rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 2.5rem;
+            transition: transform 0.3s, box-shadow 0.3s;
+            backdrop-filter: blur(10px);
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+
+        .card-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
+            display: inline-block;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .card h3 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            color: var(--text-main);
+        }
+
+        .card p {
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+
+        /* Showcase Section */
+        .showcase {
+            background: rgba(255, 255, 255, 0.02);
+            border-top: 1px solid var(--border-color);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .showcase-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 4rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .showcase-item {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 3rem;
+            align-items: center;
+        }
+
+        .showcase-item:nth-child(even) {
+            direction: rtl;
+        }
+
+        .showcase-item:nth-child(even) .showcase-content {
+            direction: ltr;
+        }
+
+        .showcase-img-container {
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .showcase-img-container img {
+            width: 100%;
+            display: block;
+            transition: transform 0.5s ease;
+        }
+
+        .showcase-img-container:hover img {
+            transform: scale(1.03);
+        }
+
+        .showcase-content h3 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .showcase-content p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .showcase-content ul {
+            list-style: none;
+        }
+
+        .showcase-content li {
+            position: relative;
+            padding-left: 1.5rem;
+            margin-bottom: 0.5rem;
+            color: var(--text-muted);
+        }
+
+        .showcase-content li::before {
+            content: '→';
+            position: absolute;
+            left: 0;
+            color: var(--accent-primary);
+        }
+
+        /* Climate Section */
+        .climate-section {
+            background: rgba(16, 185, 129, 0.05);
+            border-top: 1px solid rgba(16, 185, 129, 0.2);
+            border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+            padding: 6rem 5%;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .climate-section::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.08) 0%, rgba(9, 9, 11, 0) 70%);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .climate-container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+
+        .climate-icon {
+            font-size: 3.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .climate-container h2 {
+            font-size: 2.5rem;
+            margin-bottom: 2rem;
+            color: #34d399;
+        }
+
+        .climate-content {
+            background: var(--bg-card);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            border-radius: 12px;
+            padding: 3rem;
+            backdrop-filter: blur(10px);
+            text-align: left;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+        }
+
+        .climate-content p {
+            color: var(--text-muted);
+            font-size: 1.15rem;
+            margin-bottom: 1.5rem;
+            line-height: 1.7;
+        }
+
+        .climate-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        .climate-content strong {
+            color: var(--text-main);
+            font-weight: 600;
+        }
+
+        .climate-content .highlight {
+            font-size: 1.3rem;
+            color: #6ee7b7;
+            text-align: center;
+            font-weight: 600;
+            margin-top: 2.5rem;
+            font-style: italic;
+        }
+
+        /* Call to Action */
+        .cta {
+            text-align: center;
+            padding: 8rem 5%;
+            position: relative;
+        }
+
+        .cta::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 600px;
+            height: 600px;
+            background: radial-gradient(circle, rgba(129, 140, 248, 0.1) 0%, rgba(9, 9, 11, 0) 70%);
+            z-index: -1;
+            pointer-events: none;
+        }
+
+        .cta h2 {
+            font-size: 3rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Footer */
+        footer {
+            padding: 3rem 5%;
+            text-align: center;
+            border-top: 1px solid var(--border-color);
+            background: rgba(0, 0, 0, 0.2);
+            color: var(--text-muted);
+        }
+
+        /* Responsive */
+        @media (max-width: 900px) {
+            .showcase-item {
+                grid-template-columns: 1fr;
+            }
+
+            .showcase-item:nth-child(even) {
+                direction: ltr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .nav-links {
+                display: none;
+            }
+
+            .hero-actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                text-align: center;
+            }
+        }
+
+        /* Utilities */
+        code {
+            font-family: 'Fira Code', monospace;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-size: 0.9em;
+            color: var(--accent-primary);
+        }
+
+        /* Intersection Observer Animations */
+        .fade-in {
+            opacity: 0;
+            transform: translateY(30px);
+            transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+        }
+
+        .fade-in.appear {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+
+<body>
+
+    <nav>
+        <a href="#" class="logo">
+            <span>&gt;_</span> TI
+        </a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#showcase">Showcase</a>
+            <a href="#climate">Climate</a>
+            <a href="/manual.html" target="_blank">Documentation</a>
+        </div>
+        <a href="#download" class="btn">Download Now</a>
+    </nav>
+
+    <header id="home">
+        <div class="hero-badge">v1.0 is here — Agentic Code Fixing</div>
+        <h1>Terminal <span>Intelligence</span></h1>
+        <p class="hero-desc">A lightweight, highly responsive CLI-based IDE with integrated AI assistance. Built in Go
+            to run seamlessly in your terminal with unparalleled speed.</p>
+
+        <div class="hero-actions">
+            <a href="#download" class="btn">Get Started</a>
+            <a href="/manual.html" target="_blank" class="btn btn-outline">Read the Manual</a>
+        </div>
+
+        <div class="hero-image-wrapper fade-in">
+            <img src="./images/create-docs.png"
+                alt="Terminal Intelligence Main Interface showing code and AI assistant">
+        </div>
+    </header>
+
+    <section id="features">
+        <h2 class="section-title fade-in">Unmatched Terminal Power</h2>
+        <p class="section-subtitle fade-in">Everything you need without leaving your keyboard.</p>
+
+        <div class="grid">
+            <div class="card fade-in">
+                <div class="card-icon">⚡</div>
+                <h3>Agentic Code Fixing</h3>
+                <p>The AI autonomously reads, analyzes, and modifies code across your open files. Real-time patching and
+                    robust preview modes ensure you stay in control.</p>
+            </div>
+            <div class="card fade-in">
+                <div class="card-icon">🧠</div>
+                <h3>Context-Aware AI</h3>
+                <p>Chat directly with your code. The AI assistant understands your workspace context and can explain
+                    complex functions or answer developmental questions.</p>
+            </div>
+            <div class="card fade-in">
+                <div class="card-icon">🔄</div>
+                <h3>Project-Wide Operations</h3>
+                <p>Run sweeping architectural changes with a single command. The AI scans your directory, finds relevant
+                    files, and applies precise SEARCH/REPLACE patches.</p>
+            </div>
+            <div class="card fade-in">
+                <div class="card-icon">🔀</div>
+                <h3>Built-in Git Integration</h3>
+                <p>A native Git interface directly within the IDE. Stage, commit, push, and review status panels without
+                    needing an external Git installation.</p>
+            </div>
+            <div class="card fade-in">
+                <div class="card-icon">💻</div>
+                <h3>Multi-Language Execution</h3>
+                <p>Write and instantly execute Bash, PowerShell, Python, Markdown, and Go natively. Watch the output
+                    appear seamlessly in your AI pane.</p>
+            </div>
+            <div class="card fade-in">
+                <div class="card-icon">🚀</div>
+                <h3>Written in Go</h3>
+                <p>Blazing fast, cross-platform performance. Ships as a single dependency-free binary for Linux, macOS,
+                    and Windows.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="showcase" class="showcase">
+        <div class="showcase-grid">
+            <!-- Showcase 1 -->
+            <div class="showcase-item fade-in">
+                <div class="showcase-content">
+                    <h3>Deep Conversational AI</h3>
+                    <p>Toggle seamlessly between code editing and AI prompting. Use simple keyboard shortcuts to ask
+                        questions and have the AI write new implementations or find bugs within your current buffer.</p>
+                    <ul>
+                        <li>Split-pane design for parallel workflow</li>
+                        <li>Force conversational mode with <code>/ask</code></li>
+                        <li>Extract AI code blocks straight into your editor</li>
+                    </ul>
+                </div>
+                <div class="showcase-img-container">
+                    <img src="./images/ti-4th-c-view.png" alt="AI Conversational Interface">
+                </div>
+            </div>
+
+            <!-- Showcase 2 -->
+            <div class="showcase-item fade-in">
+                <div class="showcase-content">
+                    <h3>Automated Git Operations</h3>
+                    <p>Stop context switching to the command line just to commit your work. TI features a highly robust
+                        internal Git UI that makes managing your repository intuitive and quick.</p>
+                    <ul>
+                        <li>Auto-detect credentials safely</li>
+                        <li>Stage & Commit with minimal keystrokes</li>
+                        <li>Visual git status overviews</li>
+                    </ul>
+                </div>
+                <div class="showcase-img-container">
+                    <img src="./images/git-status.png" alt="Git Features in TI">
+                </div>
+            </div>
+
+            <!-- Showcase 3 -->
+            <div class="showcase-item fade-in">
+                <div class="showcase-content">
+                    <h3>Powerful Navigation</h3>
+                    <p>Quickly access all of TI's advanced features through intuitive menus. Manage backups, workspaces,
+                        file trees, and configuration effortlessly.</p>
+                    <ul>
+                        <li>Fuzzy file finding</li>
+                        <li>Automated backups and fast restore</li>
+                        <li>Project scaffolding & Document generation</li>
+                    </ul>
+                </div>
+                <div class="showcase-img-container">
+                    <img src="./images/menu-guide.png" alt="TI Menu Interface">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="climate" class="climate-section">
+        <div class="climate-container fade-in">
+            <div class="climate-icon">🌍</div>
+            <h2>Our Mission: A Greener Developer Ecosystem</h2>
+            <div class="climate-content">
+                <p>
+                    Today's IDEs are overwhelmingly heavy. They come packed with massive dependencies, require constant
+                    background interpreters, and consume excessive amounts of memory, CPU, and storage. All of this
+                    translates directly to a colossal, often ignored, <strong>carbon footprint</strong>.
+                </p>
+                <p>
+                    The primary goal of <strong>Terminal Intelligence</strong> is to change this paradigm. We believe
+                    developers shouldn't have to sacrifice our planet to write great code. By building a lightning-fast,
+                    dependency-free binary in Go, we deliver all the advanced agentic features you expect from a modern
+                    IDE, but with a drastically smaller environmental impact.
+                </p>
+                <p>
+                    Beyond just a lightweight runtime, we are building local intelligence directly into the application
+                    to minimize reliance on heavy cloud AI models where possible. And because we believe in transparency
+                    and community-driven impact, the entire project is <strong>100% open source</strong>.
+                </p>
+                <p class="highlight">
+                    Let's write incredible code, while leaving a smaller footprint behind.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta" id="download">
+        <h2 class="fade-in">Ready to upgrade your terminal?</h2>
+        <p class="hero-desc fade-in" style="margin-bottom: 2rem;">Download the single binary and start writing code
+            faster with the power of generative AI.</p>
+        <div class="fade-in" style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+            <a href="https://github.com/gcclinux/terminal-intelligence/releases/latest" target="_blank"
+                rel="noopener noreferrer" class="btn">Linux (AMD64 / ARM64)</a>
+            <a href="https://github.com/gcclinux/terminal-intelligence/releases/latest" target="_blank"
+                rel="noopener noreferrer" class="btn">macOS (Intel / ARM64)</a>
+            <a href="https://github.com/gcclinux/terminal-intelligence/releases/latest" target="_blank"
+                rel="noopener noreferrer" class="btn">Windows (AMD64)</a>
+        </div>
+        <p class="fade-in" style="margin-top: 2rem; color: var(--text-muted); font-size: 0.9rem;">
+            Or build from source: <code>go build -o ti cmd/ti/main.go</code>
+        </p>
+    </section>
+
+    <footer>
+        <p>&copy; 2026 Terminal Intelligence. Built with Go.</p>
+    </footer>
+
+    <script>
+        // Intersection Observer for scroll animations
+        const observerOptions = {
+            root: null,
+            rootMargin: '0px',
+            threshold: 0.15
+        };
+
+        const observer = new IntersectionObserver((entries, observer) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('appear');
+                    observer.unobserve(entry.target);
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.fade-in').forEach(element => {
+            observer.observe(element);
+        });
+
+        // Smooth scroll for internal links only
+        document.querySelectorAll('a[href^="#"]').forEach(anchor => {
+            anchor.addEventListener('click', function (e) {
+                // If it's just "#", ignore it
+                if (this.getAttribute('href') === '#') return;
+
+                e.preventDefault();
+                const target = document.querySelector(this.getAttribute('href'));
+                if (target) {
+                    window.scrollTo({
+                        top: target.offsetTop - 80,
+                        behavior: 'smooth'
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+
+</html>
